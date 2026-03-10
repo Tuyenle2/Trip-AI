@@ -56,45 +56,32 @@ async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Vi phạm Guardrails")
     
-    # Lưu tin nhắn của user vào DB
     insert_message(request.thread_id, "user", request.message)
     
     async def event_generator():
         full_text = ""
-        # Duyệt qua từng hành động của AI
         async for event in planner_agent.achat_stream(request.thread_id, request.message):
             kind = event["event"]
-            
-            # Nếu AI quyết định DÙNG TOOL (Google Search)
             if kind == "on_tool_start":
                 tool_name = event["name"]
                 query_data = event["data"].get("input", {})
                 query = query_data.get("query", str(query_data))
                 yield f"data: {json.dumps({'type': 'tool', 'name': tool_name, 'query': query})}\n\n"
-            
-            # Nếu AI đang TRẢ VỀ CHỮ (Typewriter effect)
             elif kind == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
                 if getattr(chunk, "content", None):
                     content = chunk.content
-                    
-                    # --- BẢN VÁ LỖI NẰM Ở ĐÂY ---
                     text_piece = ""
-                    # Kiểm tra xem AI đang trả về List hay String
+                    
                     if isinstance(content, list):
-                        # Lọc lấy phần text từ trong list các dictionary
                         text_piece = "".join([item.get("text", "") for item in content if isinstance(item, dict)])
                     elif isinstance(content, str):
                         text_piece = content
                         
-                    # Chỉ cộng vào và gửi lên UI nếu thực sự có chữ
                     if text_piece:
                         full_text += text_piece
                         yield f"data: {json.dumps({'type': 'content', 'data': text_piece})}\n\n"
-                    # -----------------------------
-        
-        # Sau khi dòng chảy kết thúc, lưu trọn bộ câu trả lời vào Database
+    
         insert_message(request.thread_id, "ai", full_text)
 
-    # Trả về kết nối mở liên tục (SSE)
     return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -16,8 +16,7 @@ class ChatResponse(BaseModel):
 class SavePlanRequest(BaseModel):
     username: str
     plan_text: str
-
-# MỚI: Schema để tạo luồng chat
+    
 class ThreadCreateRequest(BaseModel):
     username: str
     title: str = "Chuyến đi mới"
