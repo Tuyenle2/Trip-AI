@@ -1,32 +1,42 @@
-import sqlite3
-
-DB_PATH = 'ai_planner.db'
+import os
+import psycopg2
 
 def get_db_connection():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    """Lấy kết nối từ biến môi trường DATABASE_URL"""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("Chưa cấu hình DATABASE_URL trong file .env")
+    return psycopg2.connect(db_url)
 
 def init_db():
+    """Khởi tạo các bảng bằng cú pháp PostgreSQL"""
     conn = get_db_connection()
     c = conn.cursor()
-    # Bảng người dùng và lịch trình đã lưu
-    c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS saved_plans (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    username TEXT, 
-                    plan_text TEXT, 
-                    created_at TEXT)''')
     
-    # --- 2 BẢNG MỚI CHO TÍNH NĂNG NHIỀU LUỒNG CHAT ---
+   
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                    username VARCHAR(255) PRIMARY KEY, 
+                    password VARCHAR(255))''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS saved_plans (
+                    id SERIAL PRIMARY KEY, 
+                    username VARCHAR(255), 
+                    plan_text TEXT, 
+                    created_at VARCHAR(50))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS threads (
-                    id TEXT PRIMARY KEY,
-                    username TEXT,
-                    title TEXT,
-                    created_at TEXT)''')
+                    id VARCHAR(255) PRIMARY KEY,
+                    username VARCHAR(255),
+                    title VARCHAR(255),
+                    created_at VARCHAR(50))''')
+                    
+   
     c.execute('''CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    thread_id TEXT,
-                    role TEXT,
+                    id SERIAL PRIMARY KEY,
+                    thread_id VARCHAR(255),
+                    role VARCHAR(50),
                     content TEXT,
-                    created_at TEXT)''')
+                    created_at VARCHAR(50))''')
+    
     conn.commit()
     conn.close()

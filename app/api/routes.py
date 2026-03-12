@@ -85,3 +85,30 @@ async def api_chat_stream(request: ChatRequest):
         insert_message(request.thread_id, "ai", full_text)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+import asyncio
+from fastapi import HTTPException
+from pydantic import BaseModel
+
+class PaymentVerificationRequest(BaseModel):
+    username: str
+    card_name: str
+    card_number: str
+    cvv: str
+
+@router.post("/verify-payment")
+async def verify_payment(req: PaymentVerificationRequest):
+   
+    await asyncio.sleep(1.5)
+    
+    if req.card_number.startswith("0000"):
+        raise HTTPException(status_code=400, detail="Thẻ bị từ chối: Tài khoản không hợp lệ hoặc bị khóa!")
+        
+    if req.card_name.strip() == "":
+        raise HTTPException(status_code=400, detail="Tên chủ tài khoản không được để trống!")
+        
+    if len(req.cvv) != 3:
+        raise HTTPException(status_code=400, detail="Mã bảo mật CVV sai định dạng!")
+        
+    return {"status": "success", "message": "Thông tin tài khoản hợp lệ, thanh toán thành công!"}

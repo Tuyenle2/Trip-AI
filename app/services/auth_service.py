@@ -1,5 +1,5 @@
 import hashlib
-import sqlite3
+import psycopg2
 from fastapi import HTTPException
 from app.db.repository import create_user, get_user_password
 
@@ -11,7 +11,7 @@ def register_user_service(username, password):
         raise HTTPException(status_code=400, detail="Tài khoản và mật khẩu phải >= 3 ký tự.")
     try:
         create_user(username, hash_password(password))
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError: 
         raise HTTPException(status_code=400, detail="Tên đăng nhập đã tồn tại!")
     return {"message": "Đăng ký thành công"}
 

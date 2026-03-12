@@ -1,7 +1,11 @@
+
+import os
 from datetime import datetime, timezone, timedelta
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -9,13 +13,48 @@ from langgraph.checkpoint.memory import MemorySaver
 
 class TripPlannerAgent:
     def __init__(self):
+        self._setup_rag()
         self._setup_tools()
         self._setup_llm()
         self._build_graph()
 
+    def _setup_rag(self):
+        """Khởi tạo hệ thống RAG đọc dữ liệu nội bộ"""
+        knowledge_path = "app/data/travel_knowledge.txt"
+        
+        if not os.path.exists("app/data"):
+            os.makedirs("app/data")
+        if not os.path.exists(knowledge_path):
+            with open(knowledge_path, "w", encoding="utf-8") as f:
+                f.write("Hệ thống AI Trip Planner. Cẩm nang mặc định.\n")
+
+        with open(knowledge_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        splits = text_splitter.create_documents([text])
+
+        
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+        vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
+        retriever = vectorstore.as_retriever()
+
+        
+        def query_knowledge(query: str) -> str:
+            docs = retriever.invoke(query)
+            return "\n\n".join([doc.page_content for doc in docs])
+
+        self.rag_tool = Tool(
+            name="internal_travel_knowledge",
+            func=query_knowledge,
+            description="Sử dụng công cụ này ĐẦU TIÊN để tra cứu chính sách công ty, luật hoàn hủy, và cẩm nang du lịch độc quyền."
+        )
     def _setup_tools(self):
         search = SerpAPIWrapper()
-        self.tools = [Tool(name="google_search", func=search.run, description="Tìm thông tin du lịch.")]
+        self.tools = [
+            Tool(name="google_search", func=search.run, description="Tìm thông tin du lịch, vé máy bay, thời tiết, giá cả trên Internet."),
+            self.rag_tool
+        ]
 
     def _setup_llm(self):
         self.llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0)
@@ -48,10 +87,12 @@ class TripPlannerAgent:
         GIAI ĐOẠN 1: HỎI TỪNG BƯỚC THU THẬP THÔNG TIN
         Khi người dùng mới bắt đầu (ví dụ: "Tôi muốn đi Quy Nhơn"), bạn TUYỆT ĐỐI KHÔNG lên lịch trình ngay. 
         Hãy hỏi LẦN LƯỢT TỪNG CÂU MỘT. Chờ họ trả lời xong mới hỏi câu tiếp theo. Mỗi câu hỏi PHẢI kèm các lựa chọn (a, b, c).
-        * Câu 1: Bạn dự định đi vào thời gian nào? (a. Sắp tới, b. Cuối năm, c. Chưa rõ)
-        * Câu 2: Bạn muốn di chuyển bằng gì? (a. Máy bay, b. Tàu hỏa, c. Tự túc)
-        * Câu 3: Bạn thích ở nơi thế nào? (a. Resort sang trọng, b. Khách sạn trung tâm, c. Homestay/Giá rẻ)
-        * Câu 4: Bạn đi cùng ai? (a. Một mình, b. Cặp đôi, c. Gia đình/Nhóm)
+        QUAN TRỌNG: Các lựa chọn (a, b, c) PHẢI ĐƯỢC XUỐNG DÒNG rõ ràng, bắt đầu bằng dấu gạch đầu dòng.
+        Ví dụ định dạng bắt buộc:
+        Bạn dự định đi vào thời gian nào?
+        - a. Sắp tới
+        - b. Cuối năm
+        - c. Chưa rõ
 
         GIAI ĐOẠN 2: LÊN LỊCH TRÌNH CHI TIẾT VÀ VẼ BẢN ĐỒ
         CHỈ KHI người dùng đã trả lời đủ, hãy dùng 'google_search' để tổng hợp và in ra lịch trình NGHIÊM NGẶT theo cấu trúc sau:
@@ -82,12 +123,19 @@ class TripPlannerAgent:
 
         QUAN TRỌNG: Cuối cùng, LUÔN MẶC ĐỊNH thêm 1 dòng ẩn chứa danh sách TẤT CẢ các địa điểm để vẽ bản đồ:
         [MAP_PLACES: Địa điểm 1, Địa điểm 2, Địa điểm 3...]
+
+        GIAI ĐOẠN 3: ĐẶT PHÒNG & THANH TOÁN (RẤT QUAN TRỌNG)
+        Sau khi chốt lịch trình, hãy hỏi người dùng có muốn đặt vé/khách sạn không.
+        Nếu người dùng ĐỒNG Ý đặt, TUYỆT ĐỐI KHÔNG tự thông báo thanh toán thành công. 
+        BẠN BẮT BUỘC PHẢI in ra một dòng duy nhất có cú pháp đúng như sau:
+        [PAYMENT_FORM: Tên Dịch Vụ | Giá Tiền]
+        (Ví dụ: [PAYMENT_FORM: Khách sạn Anya Quy Nhơn | 2,500,000 VND])
+        Giao diện web của tôi sẽ tự động bắt thẻ này và hiện Form thanh toán cho khách.
         """)
 
     async def _agent_node(self, state: MessagesState):
         messages = [self._get_system_prompt()] + state["messages"]
         response = await self.llm_with_tools.ainvoke(messages)
-        
         return {"messages": [response]}
 
     def _build_graph(self):
@@ -110,11 +158,10 @@ class TripPlannerAgent:
                 content = last_msg.content
                 raw_text = "".join([i.get("text","") for i in content]) if isinstance(content, list) else content
         return raw_text
+
     async def achat_stream(self, thread_id: str, user_input: str):
-        """Hàm bất đồng bộ (Async) để hứng từng sự kiện (Event) của LangGraph"""
         config = {"configurable": {"thread_id": thread_id}}
         inputs = {"messages": [HumanMessage(content=user_input)]}
         
-        #astream_events (version="v2")
         async for event in self.app_graph.astream_events(inputs, config=config, version="v2"):
             yield event
