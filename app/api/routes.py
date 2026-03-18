@@ -116,3 +116,74 @@ async def verify_payment(req: PaymentVerificationRequest):
         raise HTTPException(status_code=400, detail="Mã bảo mật CVV sai định dạng!")
         
     return {"status": "success", "message": "Thông tin tài khoản hợp lệ, thanh toán thành công!"}
+
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+import jwt
+from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
+
+router = APIRouter()
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Không thể xác thực thông tin (Token không hợp lệ)",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        return username
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+
+@router.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    
+    fake_db_password_hash = get_password_hash("123456") 
+    
+    if not verify_password(form_data.password, fake_db_password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sai tên đăng nhập hoặc mật khẩu",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+  
+    access_token = create_access_token(data={"sub": form_data.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/transactions/me")
+async def get_my_transactions(current_user: str = Depends(get_current_user)):
+    return {"message": f"Xin chào {current_user}, đây là lịch sử giao dịch của bạn."}
+
+
+from pydantic import BaseModel
+from app.auth import get_password_hash 
+from pydantic import BaseModel
+from app.auth import get_password_hash # Import hàm băm mật khẩu từ file auth.py của bạn
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+@router.post("/register")
+async def register_user(user: UserCreate):
+    # 1. Băm mật khẩu để bảo mật
+    hashed_password = get_password_hash(user.password)
+    
+    # 2. LƯU VÀO DATABASE (PostgreSQL hoặc MongoDB)
+    # Ví dụ với MongoDB (bạn cần import client DB của bạn vào đây):
+    # existing_user = db.users.find_one({"username": user.username})
+    # if existing_user:
+    #     raise HTTPException(status_code=400, detail="Tên đăng nhập đã tồn tại!")
+    # db.users.insert_one({"username": user.username, "password_hash": hashed_password})
+    
+    return {"message": "Đăng ký thành công!"}
