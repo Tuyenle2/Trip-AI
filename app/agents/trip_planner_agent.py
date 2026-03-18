@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 import pytz
+import certifi
 from pymongo import MongoClient  
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool, tool
@@ -26,7 +27,7 @@ class TripPlannerAgent:
         self._setup_tools()
         self._setup_llm()
         
-        self.client = MongoClient(self.mongodb_uri)
+        self.client = MongoClient(self.mongodb_uri, tlsCAFile=certifi.where())
         self.memory = MongoDBSaver(self.client)
         
         workflow = StateGraph(MessagesState)
