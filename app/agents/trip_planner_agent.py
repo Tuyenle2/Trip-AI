@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 import pytz
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient  
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -10,7 +10,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.mongodb import AsyncMongoDBSaver
+from langgraph.checkpoint.mongodb import MongoDBSaver
 
 
 @tool
@@ -25,9 +25,21 @@ class TripPlannerAgent:
         self._setup_rag()
         self._setup_tools()
         self._setup_llm()
+        
+        self.client = MongoClient(self.mongodb_uri)
+        self.memory = MongoDBSaver(self.client)
+        
+        workflow = StateGraph(MessagesState)
+        workflow.add_node("agent", self._agent_node)
+        workflow.add_node("tools", ToolNode(self.tools)) 
+        workflow.add_edge(START, "agent")
+        workflow.add_conditional_edges("agent", tools_condition)
+        workflow.add_edge("tools", "agent")
+        
+        self.app_graph = workflow.compile(checkpointer=self.memory)
 
     def _setup_rag(self):
-        """Hệ thống RAG Đọc cẩm nang nội bộ (Giữ nguyên)"""
+        """Hệ thống RAG Đọc cẩm nang nội bộ"""
         knowledge_path = "app/data/travel_knowledge.txt"
         if not os.path.exists("app/data"): os.makedirs("app/data")
         if not os.path.exists(knowledge_path):
@@ -56,11 +68,10 @@ class TripPlannerAgent:
 
     def _setup_tools(self):
         search = SerpAPIWrapper()
-       
         self.tools = [
             Tool(name="google_search", func=search.run, description="Tìm thông tin vé máy bay, thời tiết, giá cả trên mạng."),
             self.rag_tool,
-            get_current_time 
+            get_current_time
         ]
 
     def _setup_llm(self):
@@ -131,28 +142,10 @@ class TripPlannerAgent:
         response = await self.llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
 
-    async def get_app_graph(self):
-        """Khởi tạo Graph BẤT ĐỒNG BỘ với MongoDB Checkpointer"""
-        workflow = StateGraph(MessagesState)
-        workflow.add_node("agent", self._agent_node)
-        workflow.add_node("tools", ToolNode(self.tools)) 
-        workflow.add_edge(START, "agent")
-        workflow.add_conditional_edges("agent", tools_condition)
-        workflow.add_edge("tools", "agent")
-        
-        
-        client = AsyncIOMotorClient(self.mongodb_uri)
-       
-        memory = AsyncMongoDBSaver(client)
-        return workflow.compile(checkpointer=memory)
-
     async def achat_stream(self, thread_id: str, user_input: str):
         """Luồng chat Streaming 100% Async"""
-       
-        app_graph = await self.get_app_graph()
-        
         config = {"configurable": {"thread_id": thread_id}}
         inputs = {"messages": [HumanMessage(content=user_input)]}
         
-        async for event in app_graph.astream_events(inputs, config=config, version="v2"):
+        async for event in self.app_graph.astream_events(inputs, config=config, version="v2"):
             yield event
