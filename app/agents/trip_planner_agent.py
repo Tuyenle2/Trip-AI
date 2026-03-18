@@ -27,7 +27,7 @@ class TripPlannerAgent:
         self._setup_tools()
         self._setup_llm()
         
-        self.client = MongoClient(self.mongodb_uri, tlsCAFile=certifi.where())
+        self.client = MongoClient(self.mongodb_uri, tlsAllowInvalidCertificates=True)
         self.memory = MongoDBSaver(self.client)
         
         workflow = StateGraph(MessagesState)
