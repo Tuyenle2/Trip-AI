@@ -10,3 +10,6 @@ python-dotenv
 httpx
 psycopg2-binary
 faiss-cpu
+pytz
+motor
+langgraph-checkpoint-mongodb

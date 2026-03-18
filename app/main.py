@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.agents.trip_planner_agent import TripPlannerAgent
@@ -24,6 +25,6 @@ def root():
     return {"message": "AI Trip Planner API is running", "docs": "/docs"}
 
 
-MONGODB_URI = "mongodb+srv://LXT03:113Tuyen@cluster0.pddzpu1.mongodb.net/?appName=Cluster0" 
+load_dotenv()
+MONGODB_URI = os.getenv("MONGODB_URI")
 planner_agent = TripPlannerAgent(mongodb_uri=MONGODB_URI)
-
