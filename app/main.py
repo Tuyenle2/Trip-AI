@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.agents.trip_planner_agent import TripPlannerAgent
 from app.core.config import setup_env
 
 setup_env()
@@ -21,3 +22,8 @@ app.include_router(router, prefix="/api")
 @app.get("/")
 def root():
     return {"message": "AI Trip Planner API is running", "docs": "/docs"}
+
+
+MONGODB_URI = "mongodb+srv://LXT03:113Tuyen@cluster0.pddzpu1.mongodb.net/?appName=Cluster0" 
+planner_agent = TripPlannerAgent(mongodb_uri=MONGODB_URI)
+
