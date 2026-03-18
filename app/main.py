@@ -25,6 +25,3 @@ def root():
     return {"message": "AI Trip Planner API is running", "docs": "/docs"}
 
 
-load_dotenv()
-MONGODB_URI = os.getenv("MONGODB_URI")
-planner_agent = TripPlannerAgent(mongodb_uri=MONGODB_URI)

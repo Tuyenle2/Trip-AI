@@ -1,4 +1,6 @@
 import json
+import os
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models.schemas import UserAuth, ChatRequest, ChatResponse, SavePlanRequest, ThreadCreateRequest
@@ -9,7 +11,9 @@ from app.agents.trip_planner_agent import TripPlannerAgent
 from app.db.repository import create_thread, get_threads_by_user, insert_message, get_messages_by_thread
 
 router = APIRouter()
-planner_agent = TripPlannerAgent()
+load_dotenv()
+MONGODB_URI = os.getenv("MONGODB_URI")
+planner_agent = TripPlannerAgent(mongodb_uri=MONGODB_URI)
 
 @router.post("/register")
 def register_user(user: UserAuth):
