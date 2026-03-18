@@ -10,11 +10,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
+from langgraph.checkpoint.mongodb import AsyncMongoDBSaver
 
-# ==========================================
-# 1. TẠO TOOL ĐỘNG LẤY THỜI GIAN (Tránh hardcode)
-# ==========================================
+
 @tool
 def get_current_time() -> str:
     """CHỈ sử dụng công cụ này khi cần biết ngày giờ hiện tại để tính toán ngày khởi hành, kiểm tra thời tiết hoặc vé máy bay."""
@@ -27,7 +25,6 @@ class TripPlannerAgent:
         self._setup_rag()
         self._setup_tools()
         self._setup_llm()
-        # Lưu ý: Graph bây giờ sẽ được build bất đồng bộ trong lúc chạy
 
     def _setup_rag(self):
         """Hệ thống RAG Đọc cẩm nang nội bộ (Giữ nguyên)"""
@@ -59,11 +56,11 @@ class TripPlannerAgent:
 
     def _setup_tools(self):
         search = SerpAPIWrapper()
-        # Thêm Tool lấy thời gian vào danh sách vũ khí
+       
         self.tools = [
             Tool(name="google_search", func=search.run, description="Tìm thông tin vé máy bay, thời tiết, giá cả trên mạng."),
             self.rag_tool,
-            get_current_time # Tool mới
+            get_current_time 
         ]
 
     def _setup_llm(self):
@@ -143,21 +140,19 @@ class TripPlannerAgent:
         workflow.add_conditional_edges("agent", tools_condition)
         workflow.add_edge("tools", "agent")
         
-        # Kết nối Motor Client (MongoDB)
-        client = AsyncIOMotorClient(self.mongodb_uri)
         
-        # Sử dụng MongoDB làm bộ nhớ (Memory Saver) cho LangGraph
+        client = AsyncIOMotorClient(self.mongodb_uri)
+       
         memory = AsyncMongoDBSaver(client)
         return workflow.compile(checkpointer=memory)
 
     async def achat_stream(self, thread_id: str, user_input: str):
         """Luồng chat Streaming 100% Async"""
-        # Load graph với bộ nhớ MongoDB
+       
         app_graph = await self.get_app_graph()
         
         config = {"configurable": {"thread_id": thread_id}}
         inputs = {"messages": [HumanMessage(content=user_input)]}
         
-        # Sử dụng astream_events để đẩy dữ liệu bất đồng bộ mượt mà
         async for event in app_graph.astream_events(inputs, config=config, version="v2"):
             yield event
