@@ -83,6 +83,35 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 import uuid
 
+@router.get("/threads/{username}")
+def api_get_threads(username: str):
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    threads_col = db.get_collection("threads")
+    threads = list(threads_col.find({"username": username}, {"_id": 0}).sort("created_at", -1))
+    for t in threads:
+        t["id"] = t.get("thread_id") 
+    return threads
+
+@router.post("/save_plan")
+def save_plan(req: SavePlanRequest):
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    history_col = db.get_collection("history")
+    
+    history_col.insert_one({
+        "username": req.username,
+        "plan": req.plan_text,
+        "date": datetime.now().strftime("%d/%m/%Y %H:%M")
+    })
+    return {"status": "success"}
+
+@router.get("/history/{username}")
+def get_history(username: str):
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    history_col = db.get_collection("history")
+    history = list(history_col.find({"username": username}, {"_id": 0}))
+    return history[::-1]
+
+
 @router.post("/threads")
 def api_create_thread(req: ThreadCreateRequest):
     db = planner_agent.client.get_database("ai_trip_planner_db")
@@ -97,13 +126,6 @@ def api_create_thread(req: ThreadCreateRequest):
     }
     threads_col.insert_one(new_thread)
     return {"id": thread_id, "thread_id": thread_id, "title": req.title}
-
-@router.get("/threads/{username}")
-def api_get_threads(username: str):
-    db = planner_agent.client.get_database("ai_trip_planner_db")
-    threads_col = db.get_collection("threads")
-    threads = list(threads_col.find({"username": username}, {"_id": 0}).sort("created_at", -1))
-    return threads
 
 @router.get("/messages/{thread_id}")
 def api_get_messages(thread_id: str):
@@ -162,14 +184,6 @@ async def api_chat_stream(request: ChatRequest):
             })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-@router.post("/save_plan")
-def save_plan(req: SavePlanRequest):
-    return save_user_plan(req.username, req.plan_text)
-
-@router.get("/history/{username}")
-def get_history(username: str):
-    return get_user_history(username)
 
 class PaymentVerificationRequest(BaseModel):
     username: str
