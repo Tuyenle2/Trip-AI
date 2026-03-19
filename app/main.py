@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.agents.trip_planner_agent import TripPlannerAgent
 from app.core.config import setup_env
+from app.api.routes import router
 
 setup_env()
 from app.db.database import init_db
@@ -10,10 +10,11 @@ from app.api.routes import router
 init_db()
 app = FastAPI(title="AI Trip Planner API Pro", version="3.0")
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
