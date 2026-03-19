@@ -81,24 +81,52 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 
 
+import uuid
+
 @router.post("/threads")
 def api_create_thread(req: ThreadCreateRequest):
-    return create_thread(req.username, req.title)
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    threads_col = db.get_collection("threads")
+    
+    thread_id = str(uuid.uuid4())
+    new_thread = {
+        "thread_id": thread_id,
+        "username": req.username,
+        "title": req.title,
+        "created_at": datetime.now()
+    }
+    threads_col.insert_one(new_thread)
+    return {"id": thread_id, "thread_id": thread_id, "title": req.title}
 
 @router.get("/threads/{username}")
 def api_get_threads(username: str):
-    return get_threads_by_user(username)
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    threads_col = db.get_collection("threads")
+    threads = list(threads_col.find({"username": username}, {"_id": 0}).sort("created_at", -1))
+    return threads
 
 @router.get("/messages/{thread_id}")
 def api_get_messages(thread_id: str):
-    return get_messages_by_thread(thread_id)
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    msg_col = db.get_collection("messages")
+    messages = list(msg_col.find({"thread_id": thread_id}, {"_id": 0}).sort("created_at", 1))
+    return messages
 
 @router.post("/chat/stream")
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Vi phạm Guardrails")
     
-    insert_message(request.thread_id, "user", request.message)
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    msg_col = db.get_collection("messages")
+    
+    # Lưu tin nhắn của User
+    msg_col.insert_one({
+        "thread_id": request.thread_id,
+        "role": "user",
+        "content": request.message,
+        "created_at": datetime.now()
+    })
     
     async def event_generator():
         full_text = ""
@@ -124,7 +152,14 @@ async def api_chat_stream(request: ChatRequest):
                         full_text += text_piece
                         yield f"data: {json.dumps({'type': 'content', 'data': text_piece})}\n\n"
     
-        insert_message(request.thread_id, "ai", full_text)
+        # Sau khi AI nói xong, lưu tin nhắn của AI vào DB
+        if full_text:
+            msg_col.insert_one({
+                "thread_id": request.thread_id,
+                "role": "ai",
+                "content": full_text,
+                "created_at": datetime.now()
+            })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -157,10 +192,32 @@ async def verify_payment(req: PaymentVerificationRequest):
         
     return {"status": "success", "message": "Thông tin tài khoản hợp lệ, thanh toán thành công!"}
 
+from datetime import datetime
+from pydantic import BaseModel
+
+class TransactionCreate(BaseModel):
+    username: str
+    service_name: str
+    amount: str
+
+@router.post("/transactions")
+async def save_transaction(transaction: TransactionCreate):
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    trans_col = db.get_collection("transactions")
+    
+    new_trans = {
+        "username": transaction.username,
+        "service_name": transaction.service_name,
+        "amount": transaction.amount,
+        "created_at": datetime.now().strftime("%d/%m/%Y %H:%M")
+    }
+    trans_col.insert_one(new_trans)
+    return {"status": "success"}
+
 @router.get("/transactions/{username}")
 async def get_user_transactions(username: str):
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    trans_col = db.get_collection("transactions")
     
-    return [
-        {"service_name": "Khách sạn Mường Thanh", "amount": "1,500,000 VND", "created_at": "19/03/2026"},
-        {"service_name": "Vé máy bay VNA", "amount": "2,300,000 VND", "created_at": "19/03/2026"}
-    ]
+    transactions = list(trans_col.find({"username": username}, {"_id": 0}))
+    return transactions
