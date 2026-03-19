@@ -83,14 +83,21 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 import uuid
 
-@router.get("/threads/{username}")
-def api_get_threads(username: str):
+@router.post("/threads")
+def api_create_thread(req: ThreadCreateRequest):
     db = planner_agent.client.get_database("ai_trip_planner_db")
     threads_col = db.get_collection("threads")
-    threads = list(threads_col.find({"username": username}, {"_id": 0}).sort("created_at", -1))
-    for t in threads:
-        t["id"] = t.get("thread_id") 
-    return threads
+    
+    import uuid
+    thread_id = str(uuid.uuid4())
+    new_thread = {
+        "thread_id": thread_id,
+        "username": req.username,
+        "title": req.title,
+        "created_at": datetime.now()
+    }
+    threads_col.insert_one(new_thread)
+    return {"id": thread_id, "thread_id": thread_id, "title": req.title}
 
 @router.post("/save_plan")
 def save_plan(req: SavePlanRequest):
