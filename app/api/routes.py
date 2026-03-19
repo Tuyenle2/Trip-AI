@@ -12,7 +12,7 @@ from app.models.schemas import UserAuth, ChatRequest, ChatResponse, SavePlanRequ
 from app.services.planner_service import save_user_plan, get_user_history
 from app.core.security import SecurityGuard
 from app.agents.trip_planner_agent import TripPlannerAgent
-from app.db.repository import create_thread, get_threads_by_user, insert_message, get_messages_by_thread
+#from app.db.repository import create_thread, get_threads_by_user, insert_message, get_messages_by_thread
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 
 
