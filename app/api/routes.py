@@ -186,6 +186,7 @@ async def verify_payment(req: PaymentVerificationRequest):
 class RoomAuthRequest(BaseModel):
     room_id: str
     password: str
+
 @router.post("/room/join")
 def join_room(req: RoomAuthRequest):
     db = planner_agent.client.get_database("ai_trip_planner_db")
@@ -198,7 +199,6 @@ def join_room(req: RoomAuthRequest):
             raise HTTPException(status_code=400, detail="Sai mật khẩu phòng!")
         return {"status": "success", "message": "Đã vào phòng"}
     else:
-
         rooms_col.insert_one({"room_id": room_id_upper, "password": req.password, "created_at": datetime.now()})
         return {"status": "success", "message": "Đã tạo phòng mới"}
 
@@ -238,6 +238,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
         while True:
             data = await websocket.receive_text()
             
+            
             msg_doc = {
                 "room_id": room_id,
                 "username": username,
@@ -245,15 +246,22 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                 "created_at": datetime.now().strftime("%H:%M")
             }
             room_col.insert_one(msg_doc)
+            msg_doc.pop("_id", None)  
             await manager.broadcast(json.dumps(msg_doc), room_id)
             
+            
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                think_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang suy nghĩ để gợi ý cho nhóm...", "created_at": datetime.now().strftime("%H:%M")}
+                think_doc = {
+                    "room_id": room_id, 
+                    "username": "AI Bot 🤖", 
+                    "message": "⏳ <i>Đang phân tích dữ liệu để gợi ý...</i>", 
+                    "created_at": datetime.now().strftime("%H:%M")
+                }
                 await manager.broadcast(json.dumps(think_doc), room_id)
                 
                 try:
                     
-                    ai_reply = await asyncio.to_thread(planner_agent.chat, f"room_{room_id}", data)
+                    ai_reply = await asyncio.to_thread(planner_agent.chat, thread_id=f"room_{room_id}", user_input=data)
                     ai_doc = {
                         "room_id": room_id,
                         "username": "AI Bot 🤖",
@@ -261,9 +269,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                         "created_at": datetime.now().strftime("%H:%M")
                     }
                     room_col.insert_one(ai_doc)
+                    ai_doc.pop("_id", None)
                     await manager.broadcast(json.dumps(ai_doc), room_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    err_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": "❌ Lỗi kết nối AI.", "created_at": datetime.now().strftime("%H:%M")}
+                    await manager.broadcast(json.dumps(err_doc), room_id)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
