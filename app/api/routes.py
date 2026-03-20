@@ -4,7 +4,7 @@ import uuid
 import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -182,3 +182,44 @@ async def verify_payment(req: PaymentVerificationRequest):
     if len(req.cvv) != 3:
         raise HTTPException(status_code=400, detail="CVV sai!")
     return {"status": "success", "message": "Thanh toán thành công!"}
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/room")
+async def websocket_endpoint(websocket: WebSocket, username: str):
+    await manager.connect(websocket)
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    room_col = db.get_collection("room_messages")
+    
+    history = list(room_col.find({}, {"_id": 0}).sort("created_at", 1).limit(50))
+    for msg in history:
+        await websocket.send_text(json.dumps(msg))
+        
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg_doc = {
+                "username": username,
+                "message": data,
+                "created_at": datetime.now().strftime("%H:%M")
+            }
+            room_col.insert_one(msg_doc)
+            await manager.broadcast(json.dumps(msg_doc))
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
