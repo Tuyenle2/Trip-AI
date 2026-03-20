@@ -237,8 +237,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     try:
         while True:
             data = await websocket.receive_text()
-            
-            
+
             msg_doc = {
                 "room_id": room_id,
                 "username": username,
@@ -246,56 +245,49 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                 "created_at": datetime.now().strftime("%H:%M")
             }
             room_col.insert_one(msg_doc)
-            msg_doc.pop("_id", None)  
+            msg_doc.pop("_id", None)
             await manager.broadcast(json.dumps(msg_doc), room_id)
             
-            
-            # 2. Xử lý Bot AI nếu được gọi
+
             if "@AI" in data.upper() or "@BOT" in data.upper():
                 think_doc = {
                     "room_id": room_id, 
                     "username": "AI Bot 🤖", 
-                    "message": "⏳ <i>Đang phân tích dữ liệu để gợi ý...</i>", 
+                    "message": "⏳ <i>Đang phân tích bối cảnh cuộc trò chuyện để gợi ý...</i>", 
                     "created_at": datetime.now().strftime("%H:%M")
                 }
                 await manager.broadcast(json.dumps(think_doc), room_id)
                 
                 try:
-                    full_text = ""
-                    async for event in planner_agent.achat_stream(f"room_{room_id}", data):
-                        kind = event["event"]
-                        if kind == "on_chat_model_stream":
-                            chunk = event["data"]["chunk"]
-                            if getattr(chunk, "content", None):
-                                content = chunk.content
-                                text_piece = ""
-                                if isinstance(content, list):
-                                    text_piece = "".join([item.get("text", "") for item in content if isinstance(item, dict)])
-                                elif isinstance(content, str):
-                                    text_piece = content
-                                if text_piece:
-                                    full_text += text_piece
+                  
+                    recent_messages = list(room_col.find(
+                        {"room_id": room_id}, 
+                        {"_id": 0, "username": 1, "message": 1}
+                    ).sort("created_at", -1).limit(10))
                     
-                    if full_text:
-                        ai_doc = {
-                            "room_id": room_id,
-                            "username": "AI Bot 🤖",
-                            "message": full_text,
-                            "created_at": datetime.now().strftime("%H:%M")
-                        }
-                        room_col.insert_one(ai_doc)
-                        ai_doc.pop("_id", None) 
-                        await manager.broadcast(json.dumps(ai_doc), room_id)
-                    else:
-                        raise Exception("AI trả về kết quả rỗng!")
-                        
-                except Exception as e:
-                    err_doc = {
-                        "room_id": room_id, 
-                        "username": "AI Bot 🤖", 
-                        "message": f"❌ Lỗi xử lý AI: {str(e)}", 
+                  
+                    recent_messages.reverse()
+                    
+                   
+                    context = "Đề xuất cho 2 người dựa trên cuộc trò chuyện nhóm gần đây:\n"
+                    for m in recent_messages:
+                      
+                        if m['username'] != "AI Bot 🤖":
+                            context += f"({m['username']}): {m['message']}\n"
+                    
+                    ai_reply = await asyncio.to_thread(planner_agent.chat, thread_id=f"room_{room_id}", user_input=f"{context}\nCâu hỏi hiện tại: {data}")
+                    
+                    ai_doc = {
+                        "room_id": room_id,
+                        "username": "AI Bot 🤖",
+                        "message": ai_reply,
                         "created_at": datetime.now().strftime("%H:%M")
                     }
+                    room_col.insert_one(ai_doc)
+                    ai_doc.pop("_id", None)
+                    await manager.broadcast(json.dumps(ai_doc), room_id)
+                except Exception as e:
+                    err_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Lỗi xử lý AI: {str(e)}", "created_at": datetime.now().strftime("%H:%M")}
                     await manager.broadcast(json.dumps(err_doc), room_id)
 
     except WebSocketDisconnect:
