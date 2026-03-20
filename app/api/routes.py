@@ -183,43 +183,87 @@ async def verify_payment(req: PaymentVerificationRequest):
         raise HTTPException(status_code=400, detail="CVV sai!")
     return {"status": "success", "message": "Thanh toán thành công!"}
 
+class RoomAuthRequest(BaseModel):
+    room_id: str
+    password: str
+@router.post("/room/join")
+def join_room(req: RoomAuthRequest):
+    db = planner_agent.client.get_database("ai_trip_planner_db")
+    rooms_col = db.get_collection("rooms")
+    room_id_upper = req.room_id.upper()
+    
+    room = rooms_col.find_one({"room_id": room_id_upper})
+    if room:
+        if room["password"] != req.password:
+            raise HTTPException(status_code=400, detail="Sai mật khẩu phòng!")
+        return {"status": "success", "message": "Đã vào phòng"}
+    else:
+
+        rooms_col.insert_one({"room_id": room_id_upper, "password": req.password, "created_at": datetime.now()})
+        return {"status": "success", "message": "Đã tạo phòng mới"}
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
+        self.active_connections: dict[str, list[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, room_id: str):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        if room_id not in self.active_connections:
+            self.active_connections[room_id] = []
+        self.active_connections[room_id].append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket, room_id: str):
+        if room_id in self.active_connections:
+            if websocket in self.active_connections[room_id]:
+                self.active_connections[room_id].remove(websocket)
 
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
+    async def broadcast(self, message: str, room_id: str):
+        if room_id in self.active_connections:
+            for connection in self.active_connections[room_id]:
+                await connection.send_text(message)
 
 manager = ConnectionManager()
 
-@router.websocket("/ws/room")
-async def websocket_endpoint(websocket: WebSocket, username: str):
-    await manager.connect(websocket)
+@router.websocket("/ws/room/{room_id}")
+async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
+    await manager.connect(websocket, room_id)
     db = planner_agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages")
     
-    history = list(room_col.find({}, {"_id": 0}).sort("created_at", 1).limit(50))
+    history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
     for msg in history:
         await websocket.send_text(json.dumps(msg))
         
     try:
         while True:
             data = await websocket.receive_text()
+            
             msg_doc = {
+                "room_id": room_id,
                 "username": username,
                 "message": data,
                 "created_at": datetime.now().strftime("%H:%M")
             }
             room_col.insert_one(msg_doc)
-            await manager.broadcast(json.dumps(msg_doc))
+            await manager.broadcast(json.dumps(msg_doc), room_id)
+            
+            if "@AI" in data.upper() or "@BOT" in data.upper():
+                think_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang suy nghĩ để gợi ý cho nhóm...", "created_at": datetime.now().strftime("%H:%M")}
+                await manager.broadcast(json.dumps(think_doc), room_id)
+                
+                try:
+                    
+                    ai_reply = await asyncio.to_thread(planner_agent.chat, f"room_{room_id}", data)
+                    ai_doc = {
+                        "room_id": room_id,
+                        "username": "AI Bot 🤖",
+                        "message": ai_reply,
+                        "created_at": datetime.now().strftime("%H:%M")
+                    }
+                    room_col.insert_one(ai_doc)
+                    await manager.broadcast(json.dumps(ai_doc), room_id)
+                except Exception:
+                    pass
+
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(websocket, room_id)
