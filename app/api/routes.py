@@ -15,6 +15,7 @@ from app.core.security import SecurityGuard
 from app.agents.trip_planner_agent import TripPlannerAgent
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 import redis.asyncio as aioredis 
+from datetime import timedelta 
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
@@ -236,119 +237,90 @@ manager = RedisConnectionManager()
 
 room_modes = {} 
 
+
+
+# Hàm lấy giờ Việt Nam chuẩn
+def get_vn_time():
+    return (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
+
 @router.websocket("/ws/room/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     await manager.connect(websocket, room_id)
     db = planner_agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages")
     
-    # Gửi lịch sử chat cũ trước
-    history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
-    for msg in history:
-        await websocket.send_text(json.dumps(msg))
-        
-    # Task lắng nghe Redis bền bỉ
+    # Task lắng nghe Redis (Cải tiến: Tự hủy khi đứt kết nối)
     async def redis_listener():
         pubsub = redis_client.pubsub()
         await pubsub.subscribe(f"chat_{room_id}")
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    # Đảm bảo WebSocket vẫn sống trước khi gửi
                     await websocket.send_text(message["data"])
-        except Exception as e:
-            print(f"Redis Listen Error: {e}")
+        except Exception:
+            pass
         finally:
-            await pubsub.unsubscribe(f"chat_{room_id}")
-            await pubsub.close()
+            if not pubsub.closed:
+                await pubsub.unsubscribe(f"chat_{room_id}")
+                await pubsub.close()
 
     listener_task = asyncio.create_task(redis_listener())
 
+    # Gửi lịch sử chat
+    history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
+    for msg in history:
+        await websocket.send_text(json.dumps(msg))
+        
     try:
         while True:
-            # Chờ tin nhắn từ người dùng
             data = await websocket.receive_text()
-            data_strip = data.strip()
+            vn_now = get_vn_time()
 
             # Xử lý lệnh HITL
-            if data_strip in ["/admin", "/ai"]:
-                new_mode = "human" if data_strip == "/admin" else "ai"
-                await redis_client.set(f"mode_{room_id}", new_mode)
-                
-                msg_text = "🛑 AI đã nhường quyền cho Nhân viên." if new_mode == "human" else "✅ AI đã quay lại làm việc."
+            if data.strip() in ["/admin", "/ai"]:
+                mode = "human" if data.strip() == "/admin" else "ai"
+                await redis_client.set(f"mode_{room_id}", mode)
                 sys_msg = {
                     "room_id": room_id, "username": "HỆ THỐNG ⚙️", 
-                    "message": f"<b>[THÔNG BÁO]:</b> {msg_text}", 
-                    "created_at": datetime.now().strftime("%H:%M")
+                    "message": f"🛑 Chế độ: {mode.upper()}", "created_at": vn_now
                 }
                 await manager.publish_to_redis(room_id, json.dumps(sys_msg))
                 continue
-            
-            # Lưu và phát tin nhắn người dùng
-            msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": datetime.now().strftime("%H:%M")}
-            room_col.insert_one(msg_doc)
+
+            # Phát tin nhắn người dùng
+            msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": vn_now}
+            room_col.insert_one(msg_doc.copy())
             msg_doc.pop("_id", None)
             await manager.publish_to_redis(room_id, json.dumps(msg_doc))
             
-            # Xử lý AI Bot
+            # Xử lý AI Bot (@AI)
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                current_mode = await redis_client.get(f"mode_{room_id}")
-                if current_mode == "human":
-                    warning = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": "<i>Nhân viên đang tiếp quản, AI tạm nghỉ.</i>", "created_at": datetime.now().strftime("%H:%M")}
-                    await manager.publish_to_redis(room_id, json.dumps(warning))
-                    continue
+                mode = await redis_client.get(f"mode_{room_id}")
+                if mode == "human": continue
 
-                
-                think_doc = {
-                    "room_id": room_id, "username": "AI Bot 🤖", 
-                    "message": "⏳ <i>Đang phân tích bối cảnh nhóm để gợi ý...</i>", 
-                    "created_at": datetime.now().strftime("%H:%M")
-                }
-                await manager.publish_to_redis(room_id, json.dumps(think_doc))
+                # Báo hiệu đang suy nghĩ
+                await manager.publish_to_redis(room_id, json.dumps({
+                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳...", "created_at": vn_now
+                }))
                 
                 try:
-                    
-                    recent_msgs = list(room_col.find({"room_id": room_id}, {"_id": 0, "username": 1, "message": 1}).sort("created_at", -1).limit(10))
-                    recent_msgs.reverse()
-                    
-                    context = "Lịch sử chat nhóm:\n" + "\n".join([f"{m['username']}: {m['message']}" for m in recent_msgs if m['username'] != "AI Bot 🤖"])
-                    prompt = f"{context}\n\nCâu hỏi hiện tại: {data}"
-
-                    
+                    # Lấy bối cảnh và gọi AI (Dùng achat_stream)
                     full_text = ""
-                    async for event in planner_agent.achat_stream(f"room_{room_id}", prompt):
+                    async for event in planner_agent.achat_stream(f"room_{room_id}", data):
                         if event["event"] == "on_chat_model_stream":
-                            chunk = event["data"]["chunk"]
-                            if getattr(chunk, "content", None):
-                                
-                                content = chunk.content
-                                if isinstance(content, list):
-                                    full_text += "".join([item.get("text", "") for item in content if isinstance(item, dict)])
-                                elif isinstance(content, str):
-                                    full_text += content
+                            content = event["data"]["chunk"].content
+                            if isinstance(content, str): full_text += content
                     
                     if full_text:
-                        ai_doc = {
-                            "room_id": room_id,
-                            "username": "AI Bot 🤖",
-                            "message": full_text,
-                            "created_at": datetime.now().strftime("%H:%M")
-                        }
-                        room_col.insert_one(ai_doc)
+                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": get_vn_time()}
+                        room_col.insert_one(ai_doc.copy())
                         ai_doc.pop("_id", None)
                         await manager.publish_to_redis(room_id, json.dumps(ai_doc))
-                    else:
-                        raise Exception("AI không phản hồi")
-                            
                 except Exception as e:
-                    err_doc = {
-                        "room_id": room_id, "username": "AI Bot 🤖", 
-                        "message": f"❌ Lỗi xử lý AI: {str(e)}", 
-                        "created_at": datetime.now().strftime("%H:%M")
-                    }
-                    await manager.publish_to_redis(room_id, json.dumps(err_doc))
+                    await manager.publish_to_redis(room_id, json.dumps({
+                        "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ {str(e)}", "created_at": get_vn_time()
+                    }))
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
-    finally:
         listener_task.cancel()
