@@ -16,13 +16,17 @@ from app.agents.trip_planner_agent import TripPlannerAgent
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 import redis.asyncio as aioredis 
 
+# Lấy URL từ biến môi trường Render
 REDIS_URL = os.getenv("REDIS_URL")
 
-
+# Khởi tạo Redis với cấu hình chuyên dụng cho Upstash trên Render
 redis_client = aioredis.from_url(
     REDIS_URL, 
     decode_responses=True, 
-    ssl_cert_reqs=None 
+    # Hai dòng dưới đây là chìa khóa để hết lỗi kết nối:
+    ssl_cert_reqs=None,
+    socket_timeout=5.0,
+    retry_on_timeout=True
 )
 
 router = APIRouter()
