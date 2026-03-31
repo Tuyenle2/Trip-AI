@@ -15,10 +15,15 @@ from app.core.security import SecurityGuard
 from app.agents.trip_planner_agent import TripPlannerAgent
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 import redis.asyncio as aioredis 
-from datetime import timedelta 
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
+REDIS_URL = os.getenv("REDIS_URL")
+
+
+redis_client = aioredis.from_url(
+    REDIS_URL, 
+    decode_responses=True, 
+    ssl_cert_reqs=None 
+)
 
 router = APIRouter()
 load_dotenv()
@@ -221,10 +226,11 @@ class RedisConnectionManager:
         if room_id in self.active_connections:
             self.active_connections[room_id].remove(websocket)
 
-   
+    # Gửi tin nhắn lên Redis Channel
     async def publish_to_redis(self, room_id: str, message: str):
         await redis_client.publish(f"chat_{room_id}", message)
 
+    # Gửi tin nhắn trực tiếp đến các WebSocket đang kết nối vào Server này
     async def send_local(self, message: str, room_id: str):
         if room_id in self.active_connections:
             for connection in self.active_connections[room_id]:
@@ -237,88 +243,72 @@ manager = RedisConnectionManager()
 
 room_modes = {} 
 
-
-
-# Hàm lấy giờ Việt Nam chuẩn
-def get_vn_time():
-    return (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
-
 @router.websocket("/ws/room/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     await manager.connect(websocket, room_id)
     db = planner_agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages")
     
-    # Task lắng nghe Redis (Cải tiến: Tự hủy khi đứt kết nối)
+    # Task lắng nghe Redis: Đảm bảo luôn lắng nghe tin nhắn mới
     async def redis_listener():
         pubsub = redis_client.pubsub()
         await pubsub.subscribe(f"chat_{room_id}")
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
+                    # Gửi tin nhắn ngay lập tức ra giao diện
                     await websocket.send_text(message["data"])
         except Exception:
             pass
         finally:
-            if not pubsub.closed:
-                await pubsub.unsubscribe(f"chat_{room_id}")
-                await pubsub.close()
+            await pubsub.unsubscribe(f"chat_{room_id}")
+            await pubsub.close()
 
     listener_task = asyncio.create_task(redis_listener())
 
-    # Gửi lịch sử chat
+    # Gửi lịch sử chat ngay khi vào phòng
     history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
     for msg in history:
         await websocket.send_text(json.dumps(msg))
         
     try:
         while True:
+            # Nhận tin nhắn từ người dùng
             data = await websocket.receive_text()
-            vn_now = get_vn_time()
+            vn_now = (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
 
-            # Xử lý lệnh HITL
-            if data.strip() in ["/admin", "/ai"]:
-                mode = "human" if data.strip() == "/admin" else "ai"
-                await redis_client.set(f"mode_{room_id}", mode)
-                sys_msg = {
-                    "room_id": room_id, "username": "HỆ THỐNG ⚙️", 
-                    "message": f"🛑 Chế độ: {mode.upper()}", "created_at": vn_now
-                }
-                await manager.publish_to_redis(room_id, json.dumps(sys_msg))
-                continue
-
-            # Phát tin nhắn người dùng
+            # Lưu vào MongoDB
             msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": vn_now}
             room_col.insert_one(msg_doc.copy())
             msg_doc.pop("_id", None)
-            await manager.publish_to_redis(room_id, json.dumps(msg_doc))
             
-            # Xử lý AI Bot (@AI)
+            # PHÁT SÓNG QUA REDIS ĐỂ TẤT CẢ MỌI NGƯỜI CÙNG THẤY NGAY
+            await redis_client.publish(f"chat_{room_id}", json.dumps(msg_doc))
+            
+            # XỬ LÝ GỌI AI
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                mode = await redis_client.get(f"mode_{room_id}")
-                if mode == "human": continue
-
-                # Báo hiệu đang suy nghĩ
-                await manager.publish_to_redis(room_id, json.dumps({
-                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳...", "created_at": vn_now
+                # Thông báo AI đang suy nghĩ
+                await redis_client.publish(f"chat_{room_id}", json.dumps({
+                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang xử lý...", "created_at": vn_now
                 }))
                 
                 try:
-                    # Lấy bối cảnh và gọi AI (Dùng achat_stream)
                     full_text = ""
+                    # Gọi Agent AI
                     async for event in planner_agent.achat_stream(f"room_{room_id}", data):
                         if event["event"] == "on_chat_model_stream":
                             content = event["data"]["chunk"].content
                             if isinstance(content, str): full_text += content
                     
                     if full_text:
-                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": get_vn_time()}
+                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": vn_now}
                         room_col.insert_one(ai_doc.copy())
                         ai_doc.pop("_id", None)
-                        await manager.publish_to_redis(room_id, json.dumps(ai_doc))
+                        # Phát sóng câu trả lời của AI qua Redis
+                        await redis_client.publish(f"chat_{room_id}", json.dumps(ai_doc))
                 except Exception as e:
-                    await manager.publish_to_redis(room_id, json.dumps({
-                        "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ {str(e)}", "created_at": get_vn_time()
+                    await redis_client.publish(f"chat_{room_id}", json.dumps({
+                        "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Lỗi: {str(e)}", "created_at": vn_now
                     }))
 
     except WebSocketDisconnect:
