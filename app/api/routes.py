@@ -14,6 +14,10 @@ from app.models.schemas import UserAuth, ChatRequest, ChatResponse, SavePlanRequ
 from app.core.security import SecurityGuard
 from app.agents.trip_planner_agent import TripPlannerAgent
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
+import redis.asyncio as aioredis 
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 router = APIRouter()
 load_dotenv()
@@ -202,7 +206,7 @@ def join_room(req: RoomAuthRequest):
         rooms_col.insert_one({"room_id": room_id_upper, "password": req.password, "created_at": datetime.now()})
         return {"status": "success", "message": "Đã tạo phòng mới"}
 
-class ConnectionManager:
+class RedisConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
 
@@ -214,45 +218,75 @@ class ConnectionManager:
 
     def disconnect(self, websocket: WebSocket, room_id: str):
         if room_id in self.active_connections:
-            if websocket in self.active_connections[room_id]:
-                self.active_connections[room_id].remove(websocket)
+            self.active_connections[room_id].remove(websocket)
 
-    async def broadcast(self, message: str, room_id: str):
+   
+    async def publish_to_redis(self, room_id: str, message: str):
+        await redis_client.publish(f"chat_{room_id}", message)
+
+    async def send_local(self, message: str, room_id: str):
         if room_id in self.active_connections:
             for connection in self.active_connections[room_id]:
-                await connection.send_text(message)
+                try:
+                    await connection.send_text(message)
+                except:
+                    pass
 
-manager = ConnectionManager()
+manager = RedisConnectionManager()
 
 room_modes = {} 
 
 @router.websocket("/ws/room/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
+
     await manager.connect(websocket, room_id)
+    
     db = planner_agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages")
     
+   
+    async def redis_listener():
+        pubsub = redis_client.pubsub()
+        await pubsub.subscribe(f"chat_{room_id}")
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                   
+                    await websocket.send_text(message["data"])
+        except Exception:
+            pass
+        finally:
+            await pubsub.unsubscribe(f"chat_{room_id}")
+
+    
+    listener_task = asyncio.create_task(redis_listener())
+
+   
     history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
     for msg in history:
         await websocket.send_text(json.dumps(msg))
         
     try:
         while True:
-            data = await websocket.receive_text()
-
             
-            if data.strip() == "/admin":
-                room_modes[room_id] = "human"
-                sys_msg = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": "🛑 <b>[HITL KÍCH HOẠT]:</b> AI đã nhường quyền. Nhân viên hỗ trợ đã tham gia và sẽ trực tiếp tư vấn cho bạn.", "created_at": datetime.now().strftime("%H:%M")}
-                room_col.insert_one(sys_msg.copy())
-                await manager.broadcast(json.dumps(sys_msg), room_id)
-                continue
+            data = await websocket.receive_text()
+            data_strip = data.strip()
 
-            if data.strip() == "/ai":
-                room_modes[room_id] = "ai"
-                sys_msg = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": "✅ <b>[AI KÍCH HOẠT]:</b> Trợ lý ảo AI đã quay trở lại làm việc.", "created_at": datetime.now().strftime("%H:%M")}
-                room_col.insert_one(sys_msg.copy())
-                await manager.broadcast(json.dumps(sys_msg), room_id)
+       
+            if data_strip in ["/admin", "/ai"]:
+                new_mode = "human" if data_strip == "/admin" else "ai"
+                
+                await redis_client.set(f"mode_{room_id}", new_mode)
+                
+                msg_text = "🛑 AI đã nhường quyền cho Nhân viên hỗ trợ." if new_mode == "human" else "✅ Trợ lý AI đã sẵn sàng phục vụ trở lại."
+                sys_msg = {
+                    "room_id": room_id, 
+                    "username": "HỆ THỐNG ⚙️", 
+                    "message": f"<b>[HITL]:</b> {msg_text}", 
+                    "created_at": datetime.now().strftime("%H:%M")
+                }
+                # Phát sóng trạng thái mới qua Redis
+                await manager.publish_to_redis(room_id, json.dumps(sys_msg))
                 continue
             
            
@@ -263,58 +297,75 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                 "created_at": datetime.now().strftime("%H:%M")
             }
             room_col.insert_one(msg_doc)
-            msg_doc.pop("_id", None)
-            await manager.broadcast(json.dumps(msg_doc), room_id)
+            msg_doc.pop("_id", None) 
             
+           
+            await manager.publish_to_redis(room_id, json.dumps(msg_doc))
             
+          
             if "@AI" in data.upper() or "@BOT" in data.upper():
                 
-                
-                if room_modes.get(room_id, "ai") == "human":
-                    warning = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": "<i>Hệ thống: AI hiện đang bị tắt. Nhân viên hỗ trợ sẽ đọc và trả lời bạn ngay lập tức!</i>", "created_at": datetime.now().strftime("%H:%M")}
-                    await manager.broadcast(json.dumps(warning), room_id)
-                else:
-                    
-                    think_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ <i>Đang phân tích bối cảnh nhóm để gợi ý...</i>", "created_at": datetime.now().strftime("%H:%M")}
-                    await manager.broadcast(json.dumps(think_doc), room_id)
-                    
-                    try:
-                        recent_messages = list(room_col.find({"room_id": room_id}, {"_id": 0, "username": 1, "message": 1}).sort("created_at", -1).limit(10))
-                        recent_messages.reverse()
-                        
-                        context = "Dưới đây là lịch sử chat nhóm gần đây của các thành viên:\n"
-                        for m in recent_messages:
-                            if m['username'] != "AI Bot 🤖" and m['username'] != "HỆ THỐNG ⚙️":
-                                context += f"- {m['username']}: {m['message']}\n"
-                        
-                        prompt = f"{context}\nDựa vào cuộc trò chuyện nhóm ở trên, hãy trả lời câu hỏi này: {data}"
+        
+                current_mode = await redis_client.get(f"mode_{room_id}")
+                if current_mode == "human":
+                    warning = {
+                        "room_id": room_id, "username": "HỆ THỐNG ⚙️", 
+                        "message": "<i>Nhân viên đang tiếp quản phòng chat này. AI tạm thời dừng trả lời.</i>", 
+                        "created_at": datetime.now().strftime("%H:%M")
+                    }
+                    await manager.publish_to_redis(room_id, json.dumps(warning))
+                    continue
 
-                        full_text = ""
-                        async for event in planner_agent.achat_stream(f"room_{room_id}", prompt):
-                            kind = event["event"]
-                            if kind == "on_chat_model_stream":
-                                chunk = event["data"]["chunk"]
-                                if getattr(chunk, "content", None):
-                                    content = chunk.content
-                                    text_piece = ""
-                                    if isinstance(content, list):
-                                        text_piece = "".join([item.get("text", "") for item in content if isinstance(item, dict)])
-                                    elif isinstance(content, str):
-                                        text_piece = content
-                                    if text_piece:
-                                        full_text += text_piece
-                        
-                        if full_text:
-                            ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": datetime.now().strftime("%H:%M")}
-                            room_col.insert_one(ai_doc)
-                            ai_doc.pop("_id", None)
-                            await manager.broadcast(json.dumps(ai_doc), room_id)
-                        else:
-                            raise Exception("AI không trả về kết quả!")
+                
+                think_doc = {
+                    "room_id": room_id, "username": "AI Bot 🤖", 
+                    "message": "⏳ <i>Đang phân tích bối cảnh nhóm để gợi ý...</i>", 
+                    "created_at": datetime.now().strftime("%H:%M")
+                }
+                await manager.publish_to_redis(room_id, json.dumps(think_doc))
+                
+                try:
+                    
+                    recent_msgs = list(room_col.find({"room_id": room_id}, {"_id": 0, "username": 1, "message": 1}).sort("created_at", -1).limit(10))
+                    recent_msgs.reverse()
+                    
+                    context = "Lịch sử chat nhóm:\n" + "\n".join([f"{m['username']}: {m['message']}" for m in recent_msgs if m['username'] != "AI Bot 🤖"])
+                    prompt = f"{context}\n\nCâu hỏi hiện tại: {data}"
+
+                    
+                    full_text = ""
+                    async for event in planner_agent.achat_stream(f"room_{room_id}", prompt):
+                        if event["event"] == "on_chat_model_stream":
+                            chunk = event["data"]["chunk"]
+                            if getattr(chunk, "content", None):
+                                
+                                content = chunk.content
+                                if isinstance(content, list):
+                                    full_text += "".join([item.get("text", "") for item in content if isinstance(item, dict)])
+                                elif isinstance(content, str):
+                                    full_text += content
+                    
+                    if full_text:
+                        ai_doc = {
+                            "room_id": room_id,
+                            "username": "AI Bot 🤖",
+                            "message": full_text,
+                            "created_at": datetime.now().strftime("%H:%M")
+                        }
+                        room_col.insert_one(ai_doc)
+                        ai_doc.pop("_id", None)
+                        await manager.publish_to_redis(room_id, json.dumps(ai_doc))
+                    else:
+                        raise Exception("AI không phản hồi")
                             
-                    except Exception as e:
-                        err_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Lỗi xử lý AI: {str(e)}", "created_at": datetime.now().strftime("%H:%M")}
-                        await manager.broadcast(json.dumps(err_doc), room_id)
+                except Exception as e:
+                    err_doc = {
+                        "room_id": room_id, "username": "AI Bot 🤖", 
+                        "message": f"❌ Lỗi xử lý AI: {str(e)}", 
+                        "created_at": datetime.now().strftime("%H:%M")
+                    }
+                    await manager.publish_to_redis(room_id, json.dumps(err_doc))
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
+        listener_task.cancel() 
