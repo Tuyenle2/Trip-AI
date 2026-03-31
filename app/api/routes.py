@@ -238,81 +238,63 @@ room_modes = {}
 
 @router.websocket("/ws/room/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
-
     await manager.connect(websocket, room_id)
-    
     db = planner_agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages")
     
-   
+    # Gửi lịch sử chat cũ trước
+    history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
+    for msg in history:
+        await websocket.send_text(json.dumps(msg))
+        
+    # Task lắng nghe Redis bền bỉ
     async def redis_listener():
         pubsub = redis_client.pubsub()
         await pubsub.subscribe(f"chat_{room_id}")
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                   
+                    # Đảm bảo WebSocket vẫn sống trước khi gửi
                     await websocket.send_text(message["data"])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Redis Listen Error: {e}")
         finally:
             await pubsub.unsubscribe(f"chat_{room_id}")
+            await pubsub.close()
 
-    
     listener_task = asyncio.create_task(redis_listener())
 
-   
-    history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
-    for msg in history:
-        await websocket.send_text(json.dumps(msg))
-        
     try:
         while True:
-            
+            # Chờ tin nhắn từ người dùng
             data = await websocket.receive_text()
             data_strip = data.strip()
 
-       
+            # Xử lý lệnh HITL
             if data_strip in ["/admin", "/ai"]:
                 new_mode = "human" if data_strip == "/admin" else "ai"
-                
                 await redis_client.set(f"mode_{room_id}", new_mode)
                 
-                msg_text = "🛑 AI đã nhường quyền cho Nhân viên hỗ trợ." if new_mode == "human" else "✅ Trợ lý AI đã sẵn sàng phục vụ trở lại."
+                msg_text = "🛑 AI đã nhường quyền cho Nhân viên." if new_mode == "human" else "✅ AI đã quay lại làm việc."
                 sys_msg = {
-                    "room_id": room_id, 
-                    "username": "HỆ THỐNG ⚙️", 
-                    "message": f"<b>[HITL]:</b> {msg_text}", 
+                    "room_id": room_id, "username": "HỆ THỐNG ⚙️", 
+                    "message": f"<b>[THÔNG BÁO]:</b> {msg_text}", 
                     "created_at": datetime.now().strftime("%H:%M")
                 }
-                # Phát sóng trạng thái mới qua Redis
                 await manager.publish_to_redis(room_id, json.dumps(sys_msg))
                 continue
             
-           
-            msg_doc = {
-                "room_id": room_id,
-                "username": username,
-                "message": data,
-                "created_at": datetime.now().strftime("%H:%M")
-            }
+            # Lưu và phát tin nhắn người dùng
+            msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": datetime.now().strftime("%H:%M")}
             room_col.insert_one(msg_doc)
-            msg_doc.pop("_id", None) 
-            
-           
+            msg_doc.pop("_id", None)
             await manager.publish_to_redis(room_id, json.dumps(msg_doc))
             
-          
+            # Xử lý AI Bot
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                
-        
                 current_mode = await redis_client.get(f"mode_{room_id}")
                 if current_mode == "human":
-                    warning = {
-                        "room_id": room_id, "username": "HỆ THỐNG ⚙️", 
-                        "message": "<i>Nhân viên đang tiếp quản phòng chat này. AI tạm thời dừng trả lời.</i>", 
-                        "created_at": datetime.now().strftime("%H:%M")
-                    }
+                    warning = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": "<i>Nhân viên đang tiếp quản, AI tạm nghỉ.</i>", "created_at": datetime.now().strftime("%H:%M")}
                     await manager.publish_to_redis(room_id, json.dumps(warning))
                     continue
 
@@ -368,4 +350,5 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
-        listener_task.cancel() 
+    finally:
+        listener_task.cancel()
