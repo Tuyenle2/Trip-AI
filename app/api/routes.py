@@ -152,12 +152,20 @@ class RedisConnectionManager:
 manager = RedisConnectionManager()
 @router.websocket("/ws/room/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
-    # Kết nối và gửi tin nhắn xác nhận để xóa dòng "Đang kết nối" ở Frontend
     await manager.connect(websocket, room_id)
     
+    # Đảm bảo dùng đúng database và collection đã lưu tin nhắn chat nhóm
     db = planner_agent.client.get_database("ai_trip_planner_db")
-    room_col = db.get_collection("room_messages")
-    
+    room_col = db.get_collection("room_messages") 
+
+    # 1. GỬI LỊCH SỬ CHAT NHÓM (Fix lỗi không hiện lịch sử)
+    try:
+        history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
+        for msg in history:
+            await websocket.send_text(json.dumps(msg))
+    except Exception as e:
+        print(f"History Error: {e}")
+        
     async def redis_listener():
         pubsub = redis_client.pubsub()
         await pubsub.subscribe(f"chat_{room_id}")
@@ -165,8 +173,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     await websocket.send_text(message["data"])
-        except Exception:
-            pass
+        except Exception: pass
         finally:
             await pubsub.unsubscribe(f"chat_{room_id}")
             await pubsub.close()
@@ -181,25 +188,31 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
             msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": vn_now}
             room_col.insert_one(msg_doc.copy())
             msg_doc.pop("_id", None)
-            
-            # Phát sóng qua Redis
             await redis_client.publish(f"chat_{room_id}", json.dumps(msg_doc))
             
-            # Xử lý Bot AI (@AI)
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                # Hiện icon suy nghĩ ngay lập tức
+                # Báo AI đang xử lý
                 await redis_client.publish(f"chat_{room_id}", json.dumps({
-                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang xử lý...", "created_at": vn_now
+                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang phân tích...", "created_at": vn_now
                 }))
                 
                 try:
+                    # Lấy ngữ cảnh chat nhóm để AI trả lời đúng trọng tâm
+                    recent_msgs = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", -1).limit(10))
+                    recent_msgs.reverse()
+                    context = "\n".join([f"{m['username']}: {m['message']}" for m in recent_msgs])
+                    
                     full_text = ""
-                    # Gọi Agent AI sử dụng cơ chế achat_stream chuẩn
-                    async for event in planner_agent.achat_stream(f"room_{room_id}", data):
+                    # Gọi Agent AI - Dùng bối cảnh chat nhóm
+                    async for event in planner_agent.achat_stream(f"room_{room_id}", f"Bối cảnh: {context}\n\nCâu hỏi: {data}"):
                         if event["event"] == "on_chat_model_stream":
-                            content = event["data"]["chunk"].content
-                            if isinstance(content, str):
-                                full_text += content
+                            # Fix lỗi content có thể là list hoặc str
+                            chunk_content = event["data"]["chunk"].content
+                            if isinstance(chunk_content, list):
+                                text = "".join([c.get("text", "") for c in chunk_content if isinstance(c, dict)])
+                            else:
+                                text = chunk_content
+                            if text: full_text += text
                     
                     if full_text:
                         ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": vn_now}
@@ -207,7 +220,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                         ai_doc.pop("_id", None)
                         await redis_client.publish(f"chat_{room_id}", json.dumps(ai_doc))
                 except Exception as e:
-                    print(f"AI Error: {e}")
+                    await redis_client.publish(f"chat_{room_id}", json.dumps({
+                        "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Lỗi: {str(e)}", "created_at": vn_now
+                    }))
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
         listener_task.cancel()
