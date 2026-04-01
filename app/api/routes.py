@@ -19,29 +19,22 @@ import redis.asyncio as aioredis
 router = APIRouter()
 load_dotenv()
 
-# --- CẤU HÌNH REDIS ---
-# Tìm đoạn khởi tạo redis_client ở đầu file và thay bằng đoạn này:
-REDIS_URL = os.getenv("REDIS_URL")
+# --- CẤU HÌNH REDIS SIÊU TƯƠNG THÍCH ---
+REDIS_URL = os.getenv("REDIS_URL", "")
 
-try:
-    # Nếu link là rediss:// (có SSL), chúng ta cần cấu hình ssl_cert_reqs qua ssl_metadata hoặc tham số trực tiếp đúng chuẩn
-    if REDIS_URL and REDIS_URL.startswith("rediss://"):
-        redis_client = aioredis.from_url(
-            REDIS_URL,
-            decode_responses=True,
-            # Sử dụng tham số chuẩn cho các phiên bản redis-py mới
-            ssl_cert_reqs=None, 
-            ssl_check_hostname=False,
-            socket_timeout=5,
-            socket_connect_timeout=5
-        )
-    else:
-        redis_client = aioredis.from_url(
-            REDIS_URL, 
-            decode_responses=True
-        )
-except Exception as e:
-    print(f"CRITICAL: Redis Connection Failed: {e}")
+# Khởi tạo client với cấu hình linh hoạt cho Render + Upstash
+redis_client = aioredis.from_url(
+    REDIS_URL,
+    decode_responses=True,
+    # Chấp nhận cả "none" dạng chuỗi hoặc None tùy phiên bản thư viện
+    ssl_cert_reqs=None, 
+    ssl_check_hostname=False,
+    socket_timeout=10,
+    socket_connect_timeout=10,
+    retry_on_timeout=True
+)
+
+router = APIRouter()
 MONGODB_URI = os.getenv("MONGODB_URI")
 planner_agent = TripPlannerAgent(mongodb_uri=MONGODB_URI)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
@@ -139,18 +132,29 @@ async def api_chat_stream(request: ChatRequest):
 class RedisConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
+
     async def connect(self, websocket: WebSocket, room_id: str):
         await websocket.accept()
-        if room_id not in self.active_connections: self.active_connections[room_id] = []
+        if room_id not in self.active_connections:
+            self.active_connections[room_id] = []
         self.active_connections[room_id].append(websocket)
+        # Gửi một tin nhắn "xác nhận" để Frontend xóa dòng chữ "Đang kết nối"
+        await websocket.send_text(json.dumps({
+            "username": "HỆ THỐNG ⚙️", 
+            "message": "✅ Đã thông suốt đường truyền Redis!", 
+            "created_at": (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
+        }))
+
     def disconnect(self, websocket: WebSocket, room_id: str):
-        if room_id in self.active_connections: self.active_connections[room_id].remove(websocket)
+        if room_id in self.active_connections:
+            self.active_connections[room_id] = [w for w in self.active_connections[room_id] if w != websocket]
 
 manager = RedisConnectionManager()
-
 @router.websocket("/ws/room/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
+    # Kết nối và gửi tin nhắn xác nhận để xóa dòng "Đang kết nối" ở Frontend
     await manager.connect(websocket, room_id)
+    
     db = planner_agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages")
     
@@ -161,63 +165,49 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     await websocket.send_text(message["data"])
-        except Exception: pass
+        except Exception:
+            pass
         finally:
             await pubsub.unsubscribe(f"chat_{room_id}")
             await pubsub.close()
 
     listener_task = asyncio.create_task(redis_listener())
-    history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", 1).limit(50))
-    for msg in history: await websocket.send_text(json.dumps(msg))
-        
+
     try:
         while True:
             data = await websocket.receive_text()
-            vn_now = (datetime.now() + timedelta(hours=7)).strftime("%H:%M") # ĐÃ CHẠY VÌ CÓ TIMEDELTA
-
-            # Xử lý lệnh HITL
-            if data.strip() in ["/admin", "/ai"]:
-                mode = "human" if data.strip() == "/admin" else "ai"
-                await redis_client.set(f"mode_{room_id}", mode)
-                sys_msg = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": f"🛑 Chế độ: {mode.upper()}", "created_at": vn_now}
-                await redis_client.publish(f"chat_{room_id}", json.dumps(sys_msg))
-                continue
+            vn_now = (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
 
             msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": vn_now}
             room_col.insert_one(msg_doc.copy())
             msg_doc.pop("_id", None)
+            
+            # Phát sóng qua Redis
             await redis_client.publish(f"chat_{room_id}", json.dumps(msg_doc))
             
-            # XỬ LÝ GỌI AI
+            # Xử lý Bot AI (@AI)
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                # Thông báo cho người dùng biết AI đã nhận lệnh
+                # Hiện icon suy nghĩ ngay lập tức
                 await redis_client.publish(f"chat_{room_id}", json.dumps({
-                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang suy nghĩ...", "created_at": vn_now
+                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang xử lý...", "created_at": vn_now
                 }))
                 
                 try:
-                    # Lấy 5 tin nhắn gần nhất để AI hiểu đang chat về cái gì
-                    recent_history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", -1).limit(5))
-                    recent_history.reverse()
-                    context = "\n".join([f"{m['username']}: {m['message']}" for m in recent_history])
-                    
-                    full_prompt = f"Bối cảnh nhóm:\n{context}\n\nCâu hỏi mới: {data}"
-
                     full_text = ""
-                    # Quan trọng: Dùng full_prompt thay vì chỉ data
-                    async for event in planner_agent.achat_stream(f"room_{room_id}", full_prompt):
+                    # Gọi Agent AI sử dụng cơ chế achat_stream chuẩn
+                    async for event in planner_agent.achat_stream(f"room_{room_id}", data):
                         if event["event"] == "on_chat_model_stream":
-                            chunk = event["data"]["chunk"]
-                            if hasattr(chunk, "content") and isinstance(chunk.content, str):
-                                full_text += chunk.content
+                            content = event["data"]["chunk"].content
+                            if isinstance(content, str):
+                                full_text += content
                     
                     if full_text:
-                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": get_vn_time()}
+                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": vn_now}
                         room_col.insert_one(ai_doc.copy())
                         ai_doc.pop("_id", None)
                         await redis_client.publish(f"chat_{room_id}", json.dumps(ai_doc))
                 except Exception as e:
-                    await redis_client.publish(f"chat_{room_id}", json.dumps({"room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Lỗi: {str(e)}", "created_at": vn_now}))
+                    print(f"AI Error: {e}")
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
         listener_task.cancel()
