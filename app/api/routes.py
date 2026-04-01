@@ -20,14 +20,16 @@ import redis.asyncio as aioredis
 REDIS_URL = os.getenv("REDIS_URL")
 
 # Khởi tạo Redis với cấu hình chuyên dụng cho Upstash trên Render
-redis_client = aioredis.from_url(
-    REDIS_URL, 
-    decode_responses=True, 
-    # Hai dòng dưới đây là chìa khóa để hết lỗi kết nối:
-    ssl_cert_reqs=None,
-    socket_timeout=5.0,
-    retry_on_timeout=True
-)
+try:
+    redis_client = aioredis.from_url(
+        REDIS_URL, 
+        decode_responses=True, 
+        ssl_cert_reqs=None,
+        socket_timeout=5,
+        socket_connect_timeout=5
+    )
+except Exception as e:
+    print(f"CRITICAL: Redis Connection Failed: {e}")
 
 router = APIRouter()
 load_dotenv()
