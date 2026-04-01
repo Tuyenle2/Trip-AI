@@ -20,21 +20,28 @@ router = APIRouter()
 load_dotenv()
 
 # --- CẤU HÌNH REDIS ---
+# Tìm đoạn khởi tạo redis_client ở đầu file và thay bằng đoạn này:
 REDIS_URL = os.getenv("REDIS_URL")
 
-# Khởi tạo Redis với cơ chế sửa lỗi SSL trên Render
 try:
-    redis_client = aioredis.from_url(
-        REDIS_URL, 
-        decode_responses=True, 
-        ssl_cert_reqs="none", # ĐÃ FIX: Dùng chuỗi "none" để tránh TypeError trên Render
-        socket_timeout=5,
-        socket_connect_timeout=5,
-        retry_on_timeout=True
-    )
+    # Nếu link là rediss:// (có SSL), chúng ta cần cấu hình ssl_cert_reqs qua ssl_metadata hoặc tham số trực tiếp đúng chuẩn
+    if REDIS_URL and REDIS_URL.startswith("rediss://"):
+        redis_client = aioredis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            # Sử dụng tham số chuẩn cho các phiên bản redis-py mới
+            ssl_cert_reqs=None, 
+            ssl_check_hostname=False,
+            socket_timeout=5,
+            socket_connect_timeout=5
+        )
+    else:
+        redis_client = aioredis.from_url(
+            REDIS_URL, 
+            decode_responses=True
+        )
 except Exception as e:
     print(f"CRITICAL: Redis Connection Failed: {e}")
-
 MONGODB_URI = os.getenv("MONGODB_URI")
 planner_agent = TripPlannerAgent(mongodb_uri=MONGODB_URI)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
@@ -181,23 +188,31 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
             msg_doc.pop("_id", None)
             await redis_client.publish(f"chat_{room_id}", json.dumps(msg_doc))
             
+            # XỬ LÝ GỌI AI
             if "@AI" in data.upper() or "@BOT" in data.upper():
-                # KIỂM TRA CHẾ ĐỘ HUMAN-IN-THE-LOOP
-                current_mode = await redis_client.get(f"mode_{room_id}")
-                if current_mode == "human":
-                    warning = {"room_id": room_id, "username": "HỆ THỐNG ⚙️", "message": "<i>Nhân viên đang tiếp quản, AI tạm nghỉ.</i>", "created_at": vn_now}
-                    await redis_client.publish(f"chat_{room_id}", json.dumps(warning))
-                    continue
-
-                await redis_client.publish(f"chat_{room_id}", json.dumps({"room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang xử lý...", "created_at": vn_now}))
+                # Thông báo cho người dùng biết AI đã nhận lệnh
+                await redis_client.publish(f"chat_{room_id}", json.dumps({
+                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang suy nghĩ...", "created_at": vn_now
+                }))
+                
                 try:
+                    # Lấy 5 tin nhắn gần nhất để AI hiểu đang chat về cái gì
+                    recent_history = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", -1).limit(5))
+                    recent_history.reverse()
+                    context = "\n".join([f"{m['username']}: {m['message']}" for m in recent_history])
+                    
+                    full_prompt = f"Bối cảnh nhóm:\n{context}\n\nCâu hỏi mới: {data}"
+
                     full_text = ""
-                    async for event in planner_agent.achat_stream(f"room_{room_id}", data):
+                    # Quan trọng: Dùng full_prompt thay vì chỉ data
+                    async for event in planner_agent.achat_stream(f"room_{room_id}", full_prompt):
                         if event["event"] == "on_chat_model_stream":
-                            content = event["data"]["chunk"].content
-                            if isinstance(content, str): full_text += content
+                            chunk = event["data"]["chunk"]
+                            if hasattr(chunk, "content") and isinstance(chunk.content, str):
+                                full_text += chunk.content
+                    
                     if full_text:
-                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": vn_now}
+                        ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": get_vn_time()}
                         room_col.insert_one(ai_doc.copy())
                         ai_doc.pop("_id", None)
                         await redis_client.publish(f"chat_{room_id}", json.dumps(ai_doc))
