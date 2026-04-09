@@ -101,20 +101,38 @@ def api_get_messages(thread_id: str):
     return list(db.get_collection("messages").find({"thread_id": thread_id}, {"_id": 0}).sort("created_at", 1))
 
 # --- CHAT STREAMING CÁ NHÂN ---
+
 @router.post("/chat/stream")
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Vi phạm Guardrails")
+    
     db = planner_agent.client.get_database("ai_trip_planner_db")
     msg_col = db.get_collection("messages")
-    msg_col.insert_one({"thread_id": request.thread_id, "role": "user", "content": request.message, "created_at": datetime.now()})
+    
+    # Lưu tin nhắn User vào DB (Async)
+    await msg_col.insert_one({
+        "thread_id": request.thread_id, 
+        "role": "user", 
+        "content": request.message, 
+        "created_at": datetime.now()
+    })
     
     async def event_generator():
         full_text = ""
+        # Sử dụng đúng tên biến và phương thức achat_stream của bạn
         async for event in planner_agent.achat_stream(request.thread_id, request.message):
             kind = event["event"]
+            
             if kind == "on_tool_start":
-                yield f"data: {json.dumps({'type': 'tool', 'name': event['name'], 'query': event['data'].get('input', {}).get('query', '')})}\n\n"
+                # Lấy query từ dữ liệu thực tế của event
+                tool_data = {
+                    'type': 'tool', 
+                    'name': event['name'], 
+                    'query': event['data'].get('input', {}).get('query', '')
+                }
+                yield f"data: {json.dumps(tool_data)}\n\n"
+                
             elif kind == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
                 if getattr(chunk, "content", None):
@@ -123,10 +141,21 @@ async def api_chat_stream(request: ChatRequest):
                     if text:
                         full_text += text
                         yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
+        
+        # Lưu tin nhắn AI sau khi stream kết thúc
         if full_text:
-            msg_col.insert_one({"thread_id": request.thread_id, "role": "ai", "content": full_text, "created_at": datetime.now()})
+            await msg_col.insert_one({
+                "thread_id": request.thread_id, 
+                "role": "ai", 
+                "content": full_text, 
+                "created_at": datetime.now()
+            })
+            # Gửi tín hiệu hoàn tất để Frontend biết
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 
 # --- GROUP CHAT & REDIS PUB/SUB ---
 class RedisConnectionManager:
