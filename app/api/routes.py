@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 import jwt
+import traceback
 
 from app.models.schemas import UserAuth, ChatRequest, ChatResponse, SavePlanRequest, ThreadCreateRequest
 from app.core.security import SecurityGuard
@@ -106,52 +107,54 @@ def api_get_messages(thread_id: str):
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Vi phạm Guardrails")
-    
+
     db = planner_agent.client.get_database("ai_trip_planner_db")
     msg_col = db.get_collection("messages")
-    
-    # Lưu tin nhắn User vào DB (Async)
+
     await msg_col.insert_one({
-        "thread_id": request.thread_id, 
-        "role": "user", 
-        "content": request.message, 
+        "thread_id": request.thread_id,
+        "role": "user",
+        "content": request.message,
         "created_at": datetime.now()
     })
-    
+
     async def event_generator():
-        full_text = ""
-        # Sử dụng đúng tên biến và phương thức achat_stream của bạn
-        async for event in planner_agent.achat_stream(request.thread_id, request.message):
-            kind = event["event"]
-            
-            if kind == "on_tool_start":
-                # Lấy query từ dữ liệu thực tế của event
-                tool_data = {
-                    'type': 'tool', 
-                    'name': event['name'], 
-                    'query': event['data'].get('input', {}).get('query', '')
-                }
-                yield f"data: {json.dumps(tool_data)}\n\n"
-                
-            elif kind == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                if getattr(chunk, "content", None):
-                    content = chunk.content
-                    text = "".join([i.get("text", "") for i in content if isinstance(i, dict)]) if isinstance(content, list) else content
-                    if text:
-                        full_text += text
-                        yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
-        
-        # Lưu tin nhắn AI sau khi stream kết thúc
-        if full_text:
-            await msg_col.insert_one({
-                "thread_id": request.thread_id, 
-                "role": "ai", 
-                "content": full_text, 
-                "created_at": datetime.now()
-            })
-            # Gửi tín hiệu hoàn tất để Frontend biết
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        try:
+            full_text = ""
+            async for event in planner_agent.achat_stream(request.thread_id, request.message):
+                kind = event["event"]
+
+                if kind == "on_tool_start":
+                    tool_data = {
+                        'type': 'tool',
+                        'name': event['name'],
+                        'query': event['data'].get('input', {}).get('query', '')
+                    }
+                    yield f"data: {json.dumps(tool_data)}\n\n"
+
+                elif kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    if getattr(chunk, "content", None):
+                        content = chunk.content
+                        text = "".join([i.get("text", "") for i in content if isinstance(i, dict)]) if isinstance(content, list) else content
+                        if text:
+                            full_text += text
+                            yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
+
+            if full_text:
+                await msg_col.insert_one({
+                    "thread_id": request.thread_id,
+                    "role": "ai",
+                    "content": full_text,
+                    "created_at": datetime.now()
+                })
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as e:
+            # ĐÂY LÀ CHÌA KHÓA: Bắt lỗi và gửi về Frontend thay vì sập ngầm
+            print("=== LỖI CRASH TRONG LUỒNG STREAM AI ===")
+            traceback.print_exc() # In chi tiết lỗi ra màn hình đen Render
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
