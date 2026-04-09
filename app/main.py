@@ -10,11 +10,10 @@ from app.api.routes import router
 init_db()
 app = FastAPI(title="AI Trip Planner API Pro", version="3.0")
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
