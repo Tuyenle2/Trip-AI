@@ -10,7 +10,8 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 import jwt
 import traceback
-
+from app.agents.graph import multi_agent_app
+from langchain_core.messages import HumanMessage
 from app.models.schemas import UserAuth, ChatRequest, ChatResponse, SavePlanRequest, ThreadCreateRequest
 from app.core.security import SecurityGuard
 from app.agents.trip_planner_agent import TripPlannerAgent
@@ -27,7 +28,6 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 redis_client = aioredis.from_url(
     REDIS_URL,
     decode_responses=True,
-    # Chấp nhận cả "none" dạng chuỗi hoặc None tùy phiên bản thư viện
     ssl_cert_reqs=None, 
     ssl_check_hostname=False,
     socket_timeout=10,
@@ -111,6 +111,7 @@ async def api_chat_stream(request: ChatRequest):
     db = planner_agent.client.get_database("ai_trip_planner_db")
     msg_col = db.get_collection("messages")
 
+    # Lưu tin nhắn User (Giữ nguyên logic cũ)
     msg_col.insert_one({
         "thread_id": request.thread_id,
         "role": "user",
@@ -121,26 +122,32 @@ async def api_chat_stream(request: ChatRequest):
     async def event_generator():
         try:
             full_text = ""
-            async for event in planner_agent.achat_stream(request.thread_id, request.message):
+            # SỬ DỤNG ASTREAM_EVENTS ĐỂ THEO DÕI TỪNG AGENT TRONG GRAPH
+            async for event in multi_agent_app.astream_events(
+                {
+                    "messages": [HumanMessage(content=request.message)],
+                    "context_data": "" 
+                },
+                version="v1",
+                config={"configurable": {"thread_id": request.thread_id}}
+            ):
                 kind = event["event"]
 
+                # Theo dõi khi có Agent đang thực hiện Tool (ví dụ RAG tra cứu)
                 if kind == "on_tool_start":
-                    tool_data = {
-                        'type': 'tool',
-                        'name': event['name'],
-                        'query': event['data'].get('input', {}).get('query', '')
-                    }
-                    yield f"data: {json.dumps(tool_data)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool', 'name': event['name'], 'query': event['data'].get('input', {})})}\n\n"
 
+                # Theo dõi luồng stream văn bản từ Planner Agent
                 elif kind == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-                    if getattr(chunk, "content", None):
-                        content = chunk.content
+                    content = event["data"]["chunk"].content
+                    if content:
+                        # Xử lý text piece tương tự logic cũ của bạn
                         text = "".join([i.get("text", "") for i in content if isinstance(i, dict)]) if isinstance(content, list) else content
                         if text:
                             full_text += text
                             yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
 
+            # Lưu tin nhắn AI sau khi toàn bộ Graph chạy xong
             if full_text:
                 msg_col.insert_one({
                     "thread_id": request.thread_id,
@@ -151,9 +158,8 @@ async def api_chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
-            # ĐÂY LÀ CHÌA KHÓA: Bắt lỗi và gửi về Frontend thay vì sập ngầm
-            print("=== LỖI CRASH TRONG LUỒNG STREAM AI ===")
-            traceback.print_exc() # In chi tiết lỗi ra màn hình đen Render
+            print("=== LỖI CRASH TRONG MULTI-AGENT GRAPH ===")
+            traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
