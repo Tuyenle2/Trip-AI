@@ -111,7 +111,7 @@ async def api_chat_stream(request: ChatRequest):
     db = planner_agent.client.get_database("ai_trip_planner_db")
     msg_col = db.get_collection("messages")
 
-    await msg_col.insert_one({
+    msg_col.insert_one({
         "thread_id": request.thread_id,
         "role": "user",
         "content": request.message,
@@ -142,7 +142,7 @@ async def api_chat_stream(request: ChatRequest):
                             yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
 
             if full_text:
-                await msg_col.insert_one({
+                msg_col.insert_one({
                     "thread_id": request.thread_id,
                     "role": "ai",
                     "content": full_text,
