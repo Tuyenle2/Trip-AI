@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 import pytz
 import certifi
-from pymongo import MongoClient  
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -12,7 +11,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.mongodb import MongoDBSaver
+from motor.motor_asyncio import AsyncIOMotorClient
+from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
+
 
 
 @tool
@@ -28,9 +29,9 @@ class TripPlannerAgent:
         self._setup_tools()
         self._setup_llm()
         
-        self.client = MongoClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
-        self.memory = MongoDBSaver(self.client)
-        
+        self.client = AsyncIOMotorClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
+        self.memory = AsyncMongoDBSaver(self.client)
+
         workflow = StateGraph(MessagesState)
         workflow.add_node("planner", self.planner_nod)
         workflow.add_node("tools", ToolNode(self.tools)) 
@@ -58,26 +59,36 @@ class TripPlannerAgent:
         vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
         retriever = vectorstore.as_retriever()
 
-        def query_knowledge(query: str) -> str:
-            docs = retriever.invoke(query)
+        async def aquery_knowledge(query: str) -> str:
+            docs = await retriever.ainvoke(query) # Dùng ainvoke
             return "\n\n".join([doc.page_content for doc in docs])
 
         self.rag_tool = Tool(
             name="internal_travel_knowledge",
             func=query_knowledge,
+            coroutine=aquery_knowledge, 
             description="Dùng để tra cứu chính sách công ty, luật hoàn hủy, và cẩm nang du lịch độc quyền."
         )
 
     def _setup_tools(self):
         search = SerpAPIWrapper()
         self.tools = [
-            Tool(name="google_search", func=search.run, description="Tìm thông tin vé máy bay, thời tiết, giá cả trên mạng."),
+            Tool(
+                name="google_search", 
+                func=search.run, 
+                coroutine=search.arun, 
+                description="Tìm thông tin vé máy bay, thời tiết, giá cả trên mạng."
+            ),
             self.rag_tool,
             get_current_time
         ]
 
     def _setup_llm(self):
-        self.llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0.2)
+        self.llm = ChatGoogleGenerativeAI(
+            model="gemini-3.1-flash-lite-preview", 
+            temperature=0.2,
+            streaming=True 
+        )
         self.llm_with_tools = self.llm.bind_tools(self.tools)
 
     def _get_system_prompt(self) -> SystemMessage:
@@ -158,7 +169,6 @@ class TripPlannerAgent:
 
 agent_instance = None
 
-# --- SỬA LẠI DÒNG NÀY ---
 async def planner_nod(state: MessagesState):
     global agent_instance
     if agent_instance is None:
