@@ -143,6 +143,7 @@ class TripPlannerAgent:
         messages = [self._get_system_prompt()] + state["messages"]
         response = await self.llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
+        
 
     async def achat_stream(self, thread_id: str, user_input: str):
         """Luồng chat Streaming 100% Async"""
@@ -154,5 +155,17 @@ class TripPlannerAgent:
 
 
 
-agent_instance = TripPlannerAgent(mongodb_uri=os.getenv("MONGO_URI", "chuỗi_kết_nối_của_bạn"))
-planner_nod = agent_instance.planner_nod
+
+agent_instance = None
+
+async def planner_nod(state: MessagesState):
+    global agent_instance
+    # Chỉ khởi tạo Agent nếu nó chưa từng được khởi tạo
+    if agent_instance is None:
+        print("🚀 Khởi tạo TripPlannerAgent lần đầu tiên...")
+        import os
+        uri = os.getenv("MONGO_URI", "chuỗi_kết_nối_của_bạn_nếu_có")
+        agent_instance = TripPlannerAgent(mongodb_uri=uri)
+    
+    # Gọi hàm thực sự bên trong Class
+    return await agent_instance.planner_nod(state)
