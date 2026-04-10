@@ -58,14 +58,21 @@ class TripPlannerAgent:
         vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
         retriever = vectorstore.as_retriever()
 
+        retriever = vectorstore.as_retriever()
+
+        def query_knowledge(query: str) -> str:
+            docs = retriever.invoke(query)
+            return "\n\n".join([doc.page_content for doc in docs])
+
+        
         async def aquery_knowledge(query: str) -> str:
-            docs = await retriever.ainvoke(query) # Dùng ainvoke
+            docs = await retriever.ainvoke(query)
             return "\n\n".join([doc.page_content for doc in docs])
 
         self.rag_tool = Tool(
             name="internal_travel_knowledge",
-            func=query_knowledge,
-            coroutine=aquery_knowledge, 
+            func=query_knowledge,      
+            coroutine=aquery_knowledge,  
             description="Dùng để tra cứu chính sách công ty, luật hoàn hủy, và cẩm nang du lịch độc quyền."
         )
 
