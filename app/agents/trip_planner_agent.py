@@ -1,3 +1,4 @@
+#trip_planner_agent.py
 import os
 from datetime import datetime
 import pytz
@@ -31,7 +32,7 @@ class TripPlannerAgent:
         self.memory = MongoDBSaver(self.client)
         
         workflow = StateGraph(MessagesState)
-        workflow.add_node("planner", self.planner_node)
+        workflow.add_node("planner", self.planner_nod)
         workflow.add_node("tools", ToolNode(self.tools)) 
         workflow.add_edge(START, "planner")
         workflow.add_conditional_edges("planner", tools_condition)
@@ -138,7 +139,7 @@ class TripPlannerAgent:
         Giao diện web của tôi sẽ tự động bắt thẻ này và hiện Form thanh toán cho khách.
         """)
 
-    async def planner_node(self, state: MessagesState):
+    async def planner_nod(self, state: MessagesState):
         messages = [self._get_system_prompt()] + state["messages"]
         response = await self.llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
@@ -150,3 +151,8 @@ class TripPlannerAgent:
         
         async for event in self.app_graph.astream_events(inputs, config=config, version="v2"):
             yield event
+
+
+
+agent_instance = TripPlannerAgent(mongodb_uri=os.getenv("MONGO_URI", "chuỗi_kết_nối_của_bạn"))
+planner_nod = agent_instance.planner_nod
