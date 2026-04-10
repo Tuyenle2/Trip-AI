@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 import pytz
 import certifi
-from pymongo import MongoClient  
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -12,8 +11,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.mongodb import MongoDBSaver
-
+from motor.motor_asyncio import AsyncIOMotorClient
+from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
 
 
 
@@ -29,9 +28,9 @@ class TripPlannerAgent:
         self._setup_rag()
         self._setup_tools()
         self._setup_llm()
-        
-        self.client = MongoClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
-        self.memory = MongoDBSaver(self.client)
+
+        self.client = AsyncIOMotorClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
+        self.memory = AsyncMongoDBSaver(self.client)
 
         workflow = StateGraph(MessagesState)
         workflow.add_node("planner", self.planner_nod)
