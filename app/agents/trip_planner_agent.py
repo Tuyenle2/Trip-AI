@@ -158,14 +158,14 @@ class TripPlannerAgent:
 
 agent_instance = None
 
+# --- SỬA LẠI DÒNG NÀY ---
 async def planner_nod(state: MessagesState):
     global agent_instance
-    # Chỉ khởi tạo Agent nếu nó chưa từng được khởi tạo
     if agent_instance is None:
         print("🚀 Khởi tạo TripPlannerAgent lần đầu tiên...")
         import os
-        uri = os.getenv("MONGO_URI", "chuỗi_kết_nối_của_bạn_nếu_có")
+        # Đổi thành MONGODB_URI cho khớp với Render
+        uri = os.getenv("MONGODB_URI", "chuỗi_kết_nối_của_bạn_nếu_có") 
         agent_instance = TripPlannerAgent(mongodb_uri=uri)
     
-    # Gọi hàm thực sự bên trong Class
     return await agent_instance.planner_nod(state)
