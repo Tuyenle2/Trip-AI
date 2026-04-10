@@ -31,12 +31,12 @@ class TripPlannerAgent:
         self.memory = MongoDBSaver(self.client)
         
         workflow = StateGraph(MessagesState)
-        workflow.add_node("agent", self._agent_node)
+        workflow.add_node("planner", self.planner_node)
         workflow.add_node("tools", ToolNode(self.tools)) 
-        workflow.add_edge(START, "agent")
-        workflow.add_conditional_edges("agent", tools_condition)
-        workflow.add_edge("tools", "agent")
-        
+        workflow.add_edge(START, "planner")
+        workflow.add_conditional_edges("planner", tools_condition)
+        workflow.add_edge("tools", "planner")
+
         self.app_graph = workflow.compile(checkpointer=self.memory)
 
     def _setup_rag(self):
@@ -138,7 +138,7 @@ class TripPlannerAgent:
         Giao diện web của tôi sẽ tự động bắt thẻ này và hiện Form thanh toán cho khách.
         """)
 
-    async def _agent_node(self, state: MessagesState):
+    async def planner_node(self, state: MessagesState):
         messages = [self._get_system_prompt()] + state["messages"]
         response = await self.llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
