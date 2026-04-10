@@ -170,18 +170,35 @@ class TripPlannerAgent:
         async for event in self.app_graph.astream_events(inputs, config=config, version="v2"):
             yield event
 
-
-
-
 agent_instance = None
+is_initializing = False 
 
 async def planner_nod(state: MessagesState):
     global agent_instance
+    global is_initializing
+
     if agent_instance is None:
-        print("🚀 Khởi tạo TripPlannerAgent lần đầu tiên...")
-        import os
-        # Đổi thành MONGODB_URI cho khớp với Render
-        uri = os.getenv("MONGODB_URI", "chuỗi_kết_nối_của_bạn_nếu_có") 
-        agent_instance = TripPlannerAgent(mongodb_uri=uri)
+        if is_initializing:
+            import asyncio
+            while agent_instance is None:
+                await asyncio.sleep(0.5)
+        else:
+            is_initializing = True
+            print("🚀 Đang nổ máy TripPlannerAgent (Lazy Load)...")
+            try:
+                import os
+                uri = os.getenv("MONGODB_URI")
+                if not uri:
+                    raise ValueError("Chưa cấu hình MONGODB_URI trên Render!")
+                
+                temp_agent = TripPlannerAgent(mongodb_uri=uri)
+                agent_instance = temp_agent
+                print("✅ Khởi tạo TripPlannerAgent thành công!")
+            except Exception as e:
+                print(f"❌ Lỗi khởi tạo Agent: {e}")
+                is_initializing = False
+                raise e
+            finally:
+                is_initializing = False
     
     return await agent_instance.planner_nod(state)
