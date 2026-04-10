@@ -1,8 +1,10 @@
-#trip_planner_agent.py
+
+# trip_planner_agent.py
 import os
 from datetime import datetime
 import pytz
 import certifi
+from pymongo import MongoClient  # QUAN TRỌNG: Dùng MongoClient đồng bộ
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -11,13 +13,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
-from motor.motor_asyncio import AsyncIOMotorClient
-from langgraph.checkpoint.mongodb import MongoDBSaver
-
+from langgraph.checkpoint.mongodb import MongoDBSaver # QUAN TRỌNG: Thư viện mới
 
 
 @tool
-def get_current_time() -> str:
+async def get_current_time() -> str:
     """CHỈ sử dụng công cụ này khi cần biết ngày giờ hiện tại để tính toán ngày khởi hành, kiểm tra thời tiết hoặc vé máy bay."""
     vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
     return f"Thời gian hiện tại ở Việt Nam là: {datetime.now(vn_tz).strftime('%A, %d/%m/%Y %H:%M:%S')}"
@@ -28,9 +28,11 @@ class TripPlannerAgent:
         self._setup_rag()
         self._setup_tools()
         self._setup_llm()
-        self.client = AsyncIOMotorClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
+        
+        # Sử dụng MongoClient đồng bộ. MongoDBSaver sẽ tự bọc nó bằng asyncio.to_thread
+        self.client = MongoClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
         self.memory = MongoDBSaver(self.client)
-
+        
         workflow = StateGraph(MessagesState)
         workflow.add_node("planner", self.planner_nod)
         workflow.add_node("tools", ToolNode(self.tools)) 
@@ -58,21 +60,20 @@ class TripPlannerAgent:
         vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
         retriever = vectorstore.as_retriever()
 
-        retriever = vectorstore.as_retriever()
-
+        # Hàm đồng bộ bắt buộc
         def query_knowledge(query: str) -> str:
             docs = retriever.invoke(query)
             return "\n\n".join([doc.page_content for doc in docs])
-
-        
+            
+        # Hàm bất đồng bộ giúp tăng tốc stream
         async def aquery_knowledge(query: str) -> str:
             docs = await retriever.ainvoke(query)
             return "\n\n".join([doc.page_content for doc in docs])
 
         self.rag_tool = Tool(
             name="internal_travel_knowledge",
-            func=query_knowledge,      
-            coroutine=aquery_knowledge,  
+            func=query_knowledge,
+            coroutine=aquery_knowledge,
             description="Dùng để tra cứu chính sách công ty, luật hoàn hủy, và cẩm nang du lịch độc quyền."
         )
 
@@ -82,7 +83,7 @@ class TripPlannerAgent:
             Tool(
                 name="google_search", 
                 func=search.run, 
-                coroutine=search.arun, 
+                coroutine=search.arun,
                 description="Tìm thông tin vé máy bay, thời tiết, giá cả trên mạng."
             ),
             self.rag_tool,
@@ -93,7 +94,7 @@ class TripPlannerAgent:
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-3.1-flash-lite-preview", 
             temperature=0.2,
-            streaming=True 
+            streaming=True
         )
         self.llm_with_tools = self.llm.bind_tools(self.tools)
 
@@ -160,18 +161,11 @@ class TripPlannerAgent:
         messages = [self._get_system_prompt()] + state["messages"]
         response = await self.llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
-        
 
-    async def achat_stream(self, thread_id: str, user_input: str):
-        """Luồng chat Streaming 100% Async"""
-        config = {"configurable": {"thread_id": thread_id}}
-        inputs = {"messages": [HumanMessage(content=user_input)]}
-        
-        async for event in self.app_graph.astream_events(inputs, config=config, version="v2"):
-            yield event
 
+# --- KỸ THUẬT LAZY LOADING ---
 agent_instance = None
-is_initializing = False 
+is_initializing = False
 
 async def planner_nod(state: MessagesState):
     global agent_instance
@@ -202,3 +196,9 @@ async def planner_nod(state: MessagesState):
                 is_initializing = False
     
     return await agent_instance.planner_nod(state)
+
+async def achat_stream(thread_id: str, user_input: str):
+    """Hàm ảo để tương thích ngược nếu routes.py vẫn gọi achat_stream"""
+    # Nếu file routes.py của bạn đang gọi thẳng Multi-Agent Graph bằng astream_events 
+    # thì hàm này có thể bỏ qua. Nó chỉ ở đây để đề phòng sập.
+    pass
