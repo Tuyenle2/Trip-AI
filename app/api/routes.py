@@ -37,12 +37,9 @@ def get_agent():
     global planner_agent_instance
     if planner_agent_instance is None:
         print("🚀 Khởi tạo Agent khi có người dùng đầu tiên nhắn tin...")
-        uri = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URI") 
+        uri = os.getenv("MONGODB_URI") 
         planner_agent_instance = TripPlannerAgent(mongodb_uri=uri)
     return planner_agent_instance
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
-
 # --- MODELS ---
 class UserCreate(BaseModel):
     username: str
@@ -111,6 +108,8 @@ def api_get_messages(thread_id: str):
 
 # --- CHAT STREAMING CÁ NHÂN ---
 @router.post("/chat/stream")
+
+
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Vi phạm Guardrails")
