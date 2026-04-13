@@ -19,7 +19,6 @@ import redis.asyncio as aioredis
 router = APIRouter()
 load_dotenv()
 
-# --- CẤU HÌNH REDIS ---
 REDIS_URL = os.getenv("REDIS_URL", "")
 redis_client = aioredis.from_url(
     REDIS_URL,
@@ -31,7 +30,6 @@ redis_client = aioredis.from_url(
     retry_on_timeout=True
 )
 
-# --- SINGLETON LAZY LOAD AGENT ---
 planner_agent_instance = None
 def get_agent():
     global planner_agent_instance
@@ -40,7 +38,7 @@ def get_agent():
         uri = os.getenv("MONGODB_URI") 
         planner_agent_instance = TripPlannerAgent(mongodb_uri=uri)
     return planner_agent_instance
-# --- MODELS ---
+
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -60,7 +58,7 @@ class PaymentVerificationRequest(BaseModel):
     card_number: str
     cvv: str
 
-# --- AUTH & THREAD ROUTES ---
+
 @router.post("/register")
 async def register_user(user: UserCreate):
     agent = get_agent()
@@ -106,7 +104,7 @@ def api_get_messages(thread_id: str):
     db = agent.client.get_database("ai_trip_planner_db")
     return list(db.get_collection("messages").find({"thread_id": thread_id}, {"_id": 0}).sort("created_at", 1))
 
-# --- CHAT STREAMING CÁ NHÂN ---
+
 @router.post("/chat/stream")
 
 
@@ -128,7 +126,6 @@ async def api_chat_stream(request: ChatRequest):
     async def event_generator():
         try:
             full_text = ""
-            # QUAN TRỌNG: Dùng agent.app_graph (Đã tích hợp đủ Tools và Checkpointer)
             async for event in agent.app_graph.astream_events(
                 {"messages": [HumanMessage(content=request.message)]},
                 version="v2",
@@ -163,7 +160,7 @@ async def api_chat_stream(request: ChatRequest):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-# --- GROUP CHAT & REDIS PUB/SUB ---
+
 class RedisConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
@@ -259,7 +256,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
         manager.disconnect(websocket, room_id)
         listener_task.cancel()
 
-# --- OTHER ROUTES ---
 @router.post("/save_plan")
 def save_plan(req: SavePlanRequest):
     agent = get_agent()
