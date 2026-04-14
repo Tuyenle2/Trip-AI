@@ -94,7 +94,7 @@ class TripPlannerAgent:
 
     def _setup_llm(self):
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-3.1-flash-lite-preview", 
+            model="gemini-2.5-flash", 
             temperature=0.2,
             streaming=True
         )
