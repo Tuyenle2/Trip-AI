@@ -21,9 +21,9 @@ import contextlib
 
 @tool
 async def get_current_time() -> str:
-    """CHỈ sử dụng công cụ này khi cần biết ngày giờ hiện tại để tính toán ngày khởi hành, kiểm tra thời tiết hoặc vé máy bay."""
+    """Use this tool only when you need to know the current date and time to calculate departure dates, check weather, or flight prices."""
     vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-    return f"Thời gian hiện tại ở Việt Nam là: {datetime.now(vn_tz).strftime('%A, %d/%m/%Y %H:%M:%S')}"
+    return f"The current time in Vietnam is: {datetime.now(vn_tz).strftime('%A, %d/%m/%Y %H:%M:%S')}"
 
 class TripPlannerAgent:
     def __init__(self, mongodb_uri: str):
@@ -45,12 +45,12 @@ class TripPlannerAgent:
         self.app_graph = workflow.compile(checkpointer=self.memory)
 
     def _setup_rag(self):
-        """Hệ thống RAG Đọc cẩm nang nội bộ"""
+        """RAG System for Reading Internal Travel Guides"""
         knowledge_path = "app/data/travel_knowledge.txt"
         if not os.path.exists("app/data"): os.makedirs("app/data")
         if not os.path.exists(knowledge_path):
             with open(knowledge_path, "w", encoding="utf-8") as f:
-                f.write("Chính sách hoàn hủy: Hủy trước 7 ngày hoàn 100%.\n")
+                f.write("Cancellation Policy: Cancellation before 7 days allows 100% refund.\n")
 
         with open(knowledge_path, "r", encoding="utf-8") as f:
             text = f.read()
@@ -76,7 +76,7 @@ class TripPlannerAgent:
             name="internal_travel_knowledge",
             func=query_knowledge,
             coroutine=aquery_knowledge,
-            description="Dùng để tra cứu chính sách công ty, luật hoàn hủy, và cẩm nang du lịch độc quyền."
+            description="Use this tool to look up company policies, cancellation rules, and exclusive travel guides."
         )
 
     def _setup_tools(self):
@@ -86,7 +86,7 @@ class TripPlannerAgent:
                 name="google_search", 
                 func=search.run, 
                 coroutine=search.arun,
-                description="Tìm thông tin vé máy bay, thời tiết, giá cả trên mạng."
+                description="Search for flight information, weather, and prices online."
             ),
             self.rag_tool,
             get_current_time
@@ -190,7 +190,7 @@ async def planner_nod(state: MessagesState):
                 await asyncio.sleep(0.5)
         else:
             is_initializing = True
-            print("🚀 Đang load TripPlannerAgent (Lazy Load)...")
+            print("🚀 Loading TripPlannerAgent...")
             try:
                 import os
                 uri = os.getenv("MONGODB_URI")
@@ -201,8 +201,8 @@ async def planner_nod(state: MessagesState):
                 mcp_server_url = os.getenv("MCP_SERVER_URL") 
                 
                 if mcp_server_url:
-                    print(f"🔗 Đang kết nối tới MCP Server: {mcp_server_url}")
-                    # Kết nối bằng giao thức SSE (Server-Sent Events) 
+                    print(f"🔗 Connecting to MCP Server: {mcp_server_url}")
+                    # Connect using SSE (Server-Sent Events) protocol
                     streams = await mcp_exit_stack.enter_async_context(sse_client(mcp_server_url))
                     session = await mcp_exit_stack.enter_async_context(ClientSession(streams[0], streams[1]))
                     await session.initialize()
@@ -212,12 +212,12 @@ async def planner_nod(state: MessagesState):
                     temp_agent.tools.extend(mcp_tools)
                     
                     temp_agent.llm_with_tools = temp_agent.llm.bind_tools(temp_agent.tools)
-                    print(f"✅ Đã nạp thành công {len(mcp_tools)} công cụ từ MCP Server!")
+                    print(f"✅ Successfully loaded {len(mcp_tools)} tools from MCP Server!")
 
                 agent_instance = temp_agent
-                print("✅ Khởi tạo TripPlannerAgent thành công!")
+                print("✅ Successfully initialized TripPlannerAgent!")
             except Exception as e:
-                print(f"❌ Lỗi khởi tạo Agent/MCP: {e}")
+                print(f"❌ Agent/MCP Initialization Error: {e}")
                 is_initializing = False
                 raise e
             finally:
@@ -226,5 +226,5 @@ async def planner_nod(state: MessagesState):
     return await agent_instance.planner_nod(state)
 
 async def achat_stream(thread_id: str, user_input: str):
-    """Hàm ảo để tương thích ngược nếu routes.py vẫn gọi achat_stream"""
+    """Async function for streaming chat responses (for backward compatibility if routes.py still calls achat_stream)"""
     pass

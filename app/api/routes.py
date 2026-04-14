@@ -34,7 +34,7 @@ planner_agent_instance = None
 def get_agent():
     global planner_agent_instance
     if planner_agent_instance is None:
-        print("🚀 Khởi tạo Agent khi có người dùng đầu tiên nhắn tin...")
+        print("🚀 Initialize the Agent when the first user sends a message....")
         uri = os.getenv("MONGODB_URI") 
         planner_agent_instance = TripPlannerAgent(mongodb_uri=uri)
     return planner_agent_instance
@@ -65,10 +65,10 @@ async def register_user(user: UserCreate):
     db = agent.client.get_database("ai_trip_planner_db")
     users_col = db.get_collection("users")
     if users_col.find_one({"username": user.username}):
-        raise HTTPException(status_code=400, detail="Tên đăng nhập đã tồn tại!")
+        raise HTTPException(status_code=400, detail="The username already exists!")
     hashed_password = get_password_hash(user.password)
     users_col.insert_one({"username": user.username, "password_hash": hashed_password})
-    return {"message": "Đăng ký thành công!"}
+    return {"message": "Registration successful!"}
 
 @router.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -77,7 +77,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     users_col = db.get_collection("users")
     user_in_db = users_col.find_one({"username": form_data.username})
     if not user_in_db or not verify_password(form_data.password, user_in_db["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sai mật khẩu")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
     access_token = create_access_token(data={"sub": form_data.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -110,7 +110,7 @@ def api_get_messages(thread_id: str):
 
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
-        raise HTTPException(status_code=400, detail="Vi phạm Guardrails")
+        raise HTTPException(status_code=400, detail="Violation of Guardrails")
 
     agent = get_agent()
     db = agent.client.get_database("ai_trip_planner_db")
@@ -154,7 +154,7 @@ async def api_chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
-            print("=== LỖI CRASH TRONG MULTI-AGENT GRAPH ===")
+            print("=== CRASH ERROR IN MULTI-AGENT GRAPH ===")
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
@@ -171,8 +171,8 @@ class RedisConnectionManager:
             self.active_connections[room_id] = []
         self.active_connections[room_id].append(websocket)
         await websocket.send_text(json.dumps({
-            "username": "HỆ THỐNG ⚙️", 
-            "message": "✅ Đã thông suốt đường truyền Redis!", 
+            "username": "SYSTEM ⚙️", 
+            "message": "✅ Successfully connected to Redis!", 
             "created_at": (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
         }))
 
@@ -223,7 +223,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
             
             if "@AI" in data.upper() or "@BOT" in data.upper():
                 await redis_client.publish(f"chat_{room_id}", json.dumps({
-                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Đang phân tích...", "created_at": vn_now
+                    "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Analyzing...", "created_at": vn_now
                 }))
                 
                 try:
