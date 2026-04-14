@@ -234,7 +234,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                     full_text = ""
                     # Gọi Agent AI 
                     async for event in agent.app_graph.astream_events(
-                        {"messages": [HumanMessage(content=f"Background: {context}\n\nQuestion: {data}")]},
+                        {"messages": [HumanMessage(content=f"Group Chat Context:\n{context}\n\nUser Request: {data}\n\n(Remember to ONLY reply in English)")]},
                         version="v2",
                         config={"configurable": {"thread_id": f"room_{room_id}"}}
                     ):
