@@ -234,7 +234,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                     full_text = ""
                     # Gọi Agent AI 
                     async for event in agent.app_graph.astream_events(
-                        {"messages": [HumanMessage(content=f"Bối cảnh: {context}\n\nCâu hỏi: {data}")]},
+                        {"messages": [HumanMessage(content=f"Background: {context}\n\nQuestion: {data}")]},
                         version="v2",
                         config={"configurable": {"thread_id": f"room_{room_id}"}}
                     ):
@@ -250,7 +250,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                         await redis_client.publish(f"chat_{room_id}", json.dumps(ai_doc))
                 except Exception as e:
                     await redis_client.publish(f"chat_{room_id}", json.dumps({
-                        "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Lỗi: {str(e)}", "created_at": vn_now
+                        "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Error: {str(e)}", "created_at": vn_now
                     }))
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
@@ -285,8 +285,8 @@ async def get_user_transactions(username: str):
 @router.post("/verify-payment")
 async def verify_payment(req: PaymentVerificationRequest):
     await asyncio.sleep(1.5)
-    if req.card_number.startswith("0000"): raise HTTPException(status_code=400, detail="Thẻ bị từ chối!")
-    return {"status": "success", "message": "Thành công!"}
+    if req.card_number.startswith("0000"): raise HTTPException(status_code=400, detail="Card rejected!")
+    return {"status": "success", "message": "Success!"}
 
 @router.post("/room/join")
 def join_room(req: RoomAuthRequest):
@@ -296,7 +296,7 @@ def join_room(req: RoomAuthRequest):
     room_id_upper = req.room_id.upper()
     room = rooms_col.find_one({"room_id": room_id_upper})
     if room:
-        if room["password"] != req.password: raise HTTPException(status_code=400, detail="Sai mật khẩu!")
+        if room["password"] != req.password: raise HTTPException(status_code=400, detail="Incorrect password!")
         return {"status": "success"}
     rooms_col.insert_one({"room_id": room_id_upper, "password": req.password, "created_at": datetime.now()})
     return {"status": "success"}
