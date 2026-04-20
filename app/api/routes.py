@@ -244,7 +244,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                     # Không có Admin online -> Xin lỗi và chuyển cho AI
                     await redis_client.publish(f"chat_{room_id}", json.dumps({
                         "room_id": room_id, "username": "SYSTEM ⚙️", 
-                        "message": "😴 Currently, all administrators are offline. The AI ​​assistant will support you in place of the admins!"
+                        "message": "😴 Currently, all administrators are offline. The AI ​​assistant will support you in place of the admins!",
                         "created_at": vn_now
                     }))
                     trigger_ai = True 
