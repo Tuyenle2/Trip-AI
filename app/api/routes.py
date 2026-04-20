@@ -186,6 +186,10 @@ manager = RedisConnectionManager()
 async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     await manager.connect(websocket, room_id)
     
+    is_current_user_admin = "admin" in username.lower()
+    if is_current_user_admin:
+        await redis_client.sadd("online_admins", username)
+        print(f"👨‍💼 Admin {username} online!")
     agent = get_agent()
     db = agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages") 
@@ -215,14 +219,39 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     try:
         while True:
             data = await websocket.receive_text()
-            vn_now = (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
+            if data == "PING_KEEP_ALIVE": continue
 
+            vn_now = (datetime.now() + timedelta(hours=7)).strftime("%H:%M")
             msg_doc = {"room_id": room_id, "username": username, "message": data, "created_at": vn_now}
             room_col.insert_one(msg_doc.copy())
             msg_doc.pop("_id", None)
             await redis_client.publish(f"chat_{room_id}", json.dumps(msg_doc))
             
-            if "@AI" in data.upper() or "@BOT" in data.upper():
+            text_upper = data.upper()
+            trigger_ai = False
+
+            if "@ADMIN" in text_upper:
+                online_admins_count = await redis_client.scard("online_admins")
+                
+                if online_admins_count > 0:
+                    # Có Admin online -> Thông báo chờ, KHÔNG gọi AI
+                    await redis_client.publish(f"chat_{room_id}", json.dumps({
+                        "room_id": room_id, "username": "SYSTEM ⚙️", 
+                        "message": "👨‍💼 I've connected with the administrator. Please wait a moment for assistance...", 
+                        "created_at": vn_now
+                    }))
+                else:
+                    # Không có Admin online -> Xin lỗi và chuyển cho AI
+                    await redis_client.publish(f"chat_{room_id}", json.dumps({
+                        "room_id": room_id, "username": "SYSTEM ⚙️", 
+                        "message": "😴 Currently, all administrators are offline. The AI ​​assistant will support you in place of the admins!"
+                        "created_at": vn_now
+                    }))
+                    trigger_ai = True 
+            
+            elif "@AI" in text_upper or "@BOT" in text_upper:
+                trigger_ai = True
+            if trigger_ai:
                 await redis_client.publish(f"chat_{room_id}", json.dumps({
                     "room_id": room_id, "username": "AI Bot 🤖", "message": "⏳ Analyzing...", "created_at": vn_now
                 }))
@@ -256,7 +285,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_id)
         listener_task.cancel()
-
+        if is_current_user_admin:
+            await redis_client.srem("online_admins", username)
+            print(f"👨‍💼 Admin {username} offline!")
 @router.post("/save_plan")
 def save_plan(req: SavePlanRequest):
     agent = get_agent()

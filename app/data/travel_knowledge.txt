@@ -1,7 +1,51 @@
-[CHÍNH SÁCH CÔNG TY AI TRIP PLANNER]
-1. Chính sách hoàn hủy: 
-- Hủy trước 7 ngày: Hoàn 100% tiền. 
-- Hủy trước 3 ngày: Hoàn 50% tiền.
-- Hủy trong vòng 24h: Không hoàn tiền.
-2. Ưu đãi thành viên VIP: Giảm giá 15% cho tất cả các tour nội địa và miễn phí nâng hạng phòng khách sạn.
-3. Cẩm nang Quy Nhơn độc quyền: Bãi biển Kỳ Co đẹp nhất vào tháng 3 đến tháng 8. Quán bánh xèo tôm nhảy ngon nhất là quán Gia Vỹ trên đường Diên Hồng.
+[CHÍNH SÁCH VÀ CẨM NANG AI TRIP PLANNER VN]
+
+=== PHẦN 1: CHÍNH SÁCH DỊCH VỤ & THANH TOÁN ===
+
+1.1. Chính sách hoàn hủy (Cancellation Policy):
+- Hủy trước 7 ngày so với ngày khởi hành: Hoàn 100% tiền.
+- Hủy từ 3 đến 6 ngày trước ngày khởi hành: Hoàn 50% tiền.
+- Hủy trong vòng 48h (2 ngày) trước khởi hành: Không hoàn tiền.
+- Trường hợp bất khả kháng (thiên tai, dịch bệnh có công bố của nhà nước): Hoàn 100% bằng voucher sử dụng trong 12 tháng.
+
+1.2. Chính sách thay đổi lịch trình (Rescheduling Policy):
+- Khách hàng được hỗ trợ đổi ngày đi miễn phí 01 lần nếu thông báo trước 5 ngày.
+- Đổi ngày từ lần thứ 2 hoặc báo muộn hơn 5 ngày: Phụ thu 20% giá trị hợp đồng.
+
+1.3. Ưu đãi thành viên (Membership Perks):
+- Hạng VIP: Giảm ngay 15% cho tất cả các tour nội địa, miễn phí nâng hạng phòng khách sạn (tùy tình trạng phòng trống), và tặng 01 bữa tối lãng mạn trị giá 1.000.000 VNĐ.
+- Hạng Vàng (Gold): Giảm 10% khi đặt các dịch vụ lẻ (khách sạn, vé máy bay).
+- Hạng Tiêu chuẩn (Member): Tích điểm 5% giá trị chuyến đi để giảm giá cho lần đặt sau.
+
+
+=== PHẦN 2: CẨM NANG DU LỊCH ĐỘC QUYỀN ===
+
+2.1. Cẩm nang Quy Nhơn (Bình Định):
+- Thời điểm lý tưởng: Bãi biển Kỳ Co và Hòn Khô đẹp nhất, nước trong xanh nhất vào khoảng tháng 3 đến tháng 8. Tránh đi vào tháng 10-12 vì thường có mưa bão.
+- Ẩm thực bắt buộc phải thử: 
+  + Quán bánh xèo tôm nhảy ngon nhất là quán Gia Vỹ trên đường Diên Hồng.
+  + Bún cá Ngọc Liên trên đường Nguyễn Huệ nổi tiếng với chả cá siêu ngon.
+  + Hải sản tươi sống nên ăn ở eo biển Ngọc Hải (Xã Nhơn Lý) sau khi đi Kỳ Co về.
+- Mẹo nhỏ: Nên đi tour đảo ghép vào buổi sáng sớm (7h30) để tránh nắng gắt và biển êm hơn.
+
+2.2. Cẩm nang Đà Lạt (Lâm Đồng):
+- Thời điểm lý tưởng: Cuối tháng 10 đến đầu tháng 4 là mùa khô, hoa dã quỳ và mai anh đào nở rộ.
+- Ẩm thực bắt buộc phải thử:
+  + Lẩu gà lá é Tao Ngộ (đường 3/4) rất hợp ăn vào buổi tối trời lạnh.
+  + Lẩu bò quán Gỗ (Khu Ba Toa) luôn đông khách, nên đi ăn sớm trước 18h.
+  + Bánh tráng nướng chợ đêm Đà Lạt.
+- Địa điểm check-in: Đồi chè Cầu Đất (săn mây lúc 5h sáng), Thung lũng Tình Yêu, và Rừng thông Bản Áng.
+
+2.3. Cẩm nang Đà Nẵng & Hội An:
+- Lịch trình tối ưu: Nên dành 2 ngày ở Đà Nẵng (Bà Nà Hills, Bán đảo Sơn Trà) và 1 ngày 1 đêm ở Phố cổ Hội An.
+- Ẩm thực: 
+  + Đà Nẵng: Mì Quảng Ếch Bếp Trang, Hải sản Năm Đảnh (ngon rẻ nhưng hơi khó tìm đường).
+  + Hội An: Bánh mì Phượng, Cơm gà Bà Buội, và nước Mót.
+- Mẹo nhỏ: Vé cáp treo Bà Nà nên mua trước qua AI Trip Planner để không phải xếp hàng chờ đợi.
+
+
+=== PHẦN 3: QUY TRÌNH HỖ TRỢ KHÁCH HÀNG ===
+
+3.1. Kênh liên hệ khẩn cấp:
+- Hotline hỗ trợ khách hàng 24/7: 1900-xxxx.
+- Nếu khách quan tâm đến các sự cố y tế trong tour, thông báo rằng công ty có tặng kèm bảo hiểm du lịch lên đến 50.000.000 VNĐ cho mọi chuyến đi.
