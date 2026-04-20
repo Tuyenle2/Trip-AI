@@ -106,8 +106,6 @@ def api_get_messages(thread_id: str):
 
 
 @router.post("/chat/stream")
-
-
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Violation of Guardrails")
@@ -123,35 +121,58 @@ async def api_chat_stream(request: ChatRequest):
         "created_at": datetime.now()
     })
 
+    text_upper = request.message.upper()
+
     async def event_generator():
         try:
-            full_text = ""
-            async for event in agent.app_graph.astream_events(
-                {"messages": [HumanMessage(content=request.message)]},
-                version="v2",
-                config={"configurable": {"thread_id": request.thread_id}}
-            ):
-                kind = event["event"]
+            trigger_ai = True
+            if "@ADMIN" in text_upper:
+              
+                online_admins_count = await redis_client.scard("online_admins")
+                
+                if online_admins_count > 0:
+                    sys_msg = "👨‍💼 I've connected with the administrator. Please wait a moment..."
 
-                if kind == "on_tool_start":
-                    yield f"data: {json.dumps({'type': 'tool', 'name': event['name'], 'query': event['data'].get('input', {})})}\n\n"
+                    msg_col.insert_one({
+                        "thread_id": request.thread_id,
+                        "role": "SYSTEM ⚙️",
+                        "content": sys_msg,
+                        "created_at": datetime.now()
+                    })
+                
+                    yield f"data: {json.dumps({'type': 'content', 'data': sys_msg})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    trigger_ai = False  
+                else:
+                    sys_msg = "😴 Currently, all administrators are offline. The AI assistant will support you!"
+                    yield f"data: {json.dumps({'type': 'content', 'data': sys_msg})}\n\n"
 
-                elif kind == "on_chat_model_stream":
-                    content = event["data"]["chunk"].content
-                    if content:
-                        text = "".join([i.get("text", "") for i in content if isinstance(i, dict)]) if isinstance(content, list) else content
-                        if text:
-                            full_text += text
-                            yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
+            if trigger_ai:
+                full_text = ""
+                async for event in agent.app_graph.astream_events(
+                    {"messages": [HumanMessage(content=request.message)]},
+                    version="v2",
+                    config={"configurable": {"thread_id": request.thread_id}}
+                ):
+                    kind = event["event"]
+                    if kind == "on_tool_start":
+                        yield f"data: {json.dumps({'type': 'tool', 'name': event['name'], 'query': event['data'].get('input', {})})}\n\n"
+                    elif kind == "on_chat_model_stream":
+                        content = event["data"]["chunk"].content
+                        if content:
+                            text = "".join([i.get("text", "") for i in content if isinstance(i, dict)]) if isinstance(content, list) else content
+                            if text:
+                                full_text += text
+                                yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
 
-            if full_text:
-                msg_col.insert_one({
-                    "thread_id": request.thread_id,
-                    "role": "ai",
-                    "content": full_text,
-                    "created_at": datetime.now()
-                })
-                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                if full_text:
+                    msg_col.insert_one({
+                        "thread_id": request.thread_id,
+                        "role": "ai",
+                        "content": full_text,
+                        "created_at": datetime.now()
+                    })
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
             print("=== CRASH ERROR IN MULTI-AGENT GRAPH ===")
@@ -332,3 +353,21 @@ def join_room(req: RoomAuthRequest):
         return {"status": "success"}
     rooms_col.insert_one({"room_id": room_id_upper, "password": req.password, "created_at": datetime.now()})
     return {"status": "success"}
+class AdminReplyRequest(BaseModel):
+    thread_id: str
+    message: str
+
+@router.post("/admin/reply")
+async def admin_reply_message(req: AdminReplyRequest):
+    """API specifically for Admins to send messages to customer chat accounts."""
+    agent = get_agent()
+    db = agent.client.get_database("ai_trip_planner_db")
+    msg_col = db.get_collection("messages")
+    
+    msg_col.insert_one({
+        "thread_id": req.thread_id,
+        "role": "admin",
+        "content": req.message,
+        "created_at": datetime.now()
+    })
+    return {"status": "success", "message": "Admin message has been sent"}
