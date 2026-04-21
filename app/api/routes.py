@@ -12,7 +12,7 @@ import traceback
 from langchain_core.messages import HumanMessage
 from app.models.schemas import UserAuth, ChatRequest, ChatResponse, SavePlanRequest, ThreadCreateRequest
 from app.core.security import SecurityGuard
-from app.agents.trip_planner_agent import TripPlannerAgent
+from app.core.main_graph import get_agent
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 import redis.asyncio as aioredis 
 
