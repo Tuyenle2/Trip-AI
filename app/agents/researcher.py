@@ -49,7 +49,7 @@ researcher_prompt = """Bạn là Tác nhân Nghiên cứu Dữ liệu Du lịch 
 Nhiệm vụ: Sử dụng công cụ (Google Search, Internal Knowledge) để tìm kiếm thông tin theo yêu cầu của khách hàng.
 QUAN TRỌNG: Chỉ trả về DỮ LIỆU THÔ (facts, giá cả, thời tiết). Tuyệt đối KHÔNG thiết kế lịch trình chi tiết."""
 
-researcher_agent = create_react_agent(llm, tools=researcher_tools, state_modifier=researcher_prompt)
+researcher_agent = create_react_agent(llm, tools=researcher_tools, messages_modifier=researcher_prompt)
 async def call_researcher(state: dict):
     print("🔍 [Researcher Agent] Đang tra cứu dữ liệu...")
     result = await researcher_agent.ainvoke({"messages": state["messages"]})
