@@ -52,14 +52,8 @@ YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
         ### 🗺️ Detailed Itinerary
         (Divide by day. For each day, clearly separate Morning/Afternoon/Evening. Every location must include a Rating and its own Google Maps Link)
         **Day 1: [Title of Day 1]**
-        * **Morning:** * **[Location Name 1]** -
-
-[image of location]
-- ⭐ [Number of stars] ([Number of reviews] reviews) - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/search/?api=1&query=[tên_địa_điểm])
-        * **Afternoon:** * **[Location Name 2]** -
-
-[image of location]
-- ⭐ [Number of stars] ([Number of reviews] reviews) - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/dir/Tháp+Đôi/Ghềnh+Ráng+Tiên+Sa)
+        * **Morning:** * **[Location Name 1]** -⭐ [Number of stars] ([Number of reviews] reviews) - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/search/?api=1&query=[tên_địa_điểm])
+        * **Afternoon:** * **[Location Name 2]** - ⭐ [Number of stars] ([Number of reviews] reviews) - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/dir/Tháp+Đôi/Ghềnh+Ráng+Tiên+Sa)
         * **Evening:** Enjoy local cuisine or take a walk...
 
         ### 🎟️ Highlighted Activities & Tours
@@ -91,14 +85,10 @@ YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
         If the user declines or wants to change the itinerary, acknowledge it, make the changes, and loop back to PHASE 1.
 """
 
-# KHỞI TẠO BỎ TRỐNG THAM SỐ PROMPT
 planner_agent = create_react_agent(llm, tools=[get_current_time])
 
 async def call_planner(state: dict):
-    print("✍️ [Planner Agent] Đang thiết kế lịch trình và xử lý thanh toán...")
-    
-    # ÉP SYSTEM PROMPT VÀO ĐẦU LỊCH SỬ TIN NHẮN
+    print("✍️ [Planner Agent] Designing the schedule and processing payments...")
     input_messages = [SystemMessage(content=planner_prompt)] + state["messages"]
-    
     result = await planner_agent.ainvoke({"messages": input_messages})
     return {"messages": [result["messages"][-1]]}

@@ -7,17 +7,14 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.prebuilt import create_react_agent
 
-researcher_prompt = """Bạn là Tác nhân Nghiên cứu Dữ liệu Du lịch (Researcher Agent) của Navia.
-Nhiệm vụ: Sử dụng công cụ (Google Search, Internal Knowledge) để tìm kiếm thông tin theo yêu cầu của khách hàng.
-QUAN TRỌNG: Chỉ trả về DỮ LIỆU THÔ (facts, giá cả, thời tiết). Tuyệt đối KHÔNG thiết kế lịch trình chi tiết."""
-
-# Biến toàn cục để lưu trữ Agent (Lazy Loading)
+researcher_prompt = """You are a Travel Data Research Agent (Researcher Agent) for Navia.
+Responsibilities: Use tools (Google Search, Internal Knowledge, SerpAPI) to find information as requested by clients.
+IMPORTANT: Only return RAW DATA (facts, prices, weather). Absolutely DO NOT design detailed itineraries."""
 _researcher_agent_instance = None
-
 def get_researcher_agent():
     global _researcher_agent_instance
     if _researcher_agent_instance is None:
-        print("🚀 Khởi tạo Researcher Agent và nạp dữ liệu RAG lần đầu tiên...")
+        print("Initialize the Researcher Agent and load the RAG data for the first time...")
         
         knowledge_path = "app/data/travel_knowledge.txt"
         if not os.path.exists("app/data"): 
@@ -56,20 +53,13 @@ def get_researcher_agent():
 
         researcher_tools = [google_search_tool, rag_tool]
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
-
-        # Đã loại bỏ hoàn toàn tham số messages_modifier/prompt để tránh lỗi phiên bản thư viện
         _researcher_agent_instance = create_react_agent(llm, tools=researcher_tools)
         
     return _researcher_agent_instance
 
 async def call_researcher(state: dict):
-    print("🔍 [Researcher Agent] Đang tra cứu dữ liệu...")
-    
-    # Chỉ gọi khởi tạo khi có khách nhắn tin
+    print("🔍 [Researcher Agent] Data being retrieved...")
     agent = get_researcher_agent()
-    
-    # Chèn System Prompt thủ công vào lịch sử tin nhắn
     input_messages = [SystemMessage(content=researcher_prompt)] + state["messages"]
-    
     result = await agent.ainvoke({"messages": input_messages})
     return {"messages": [result["messages"][-1]]}
