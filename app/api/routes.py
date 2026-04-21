@@ -30,14 +30,14 @@ redis_client = aioredis.from_url(
     retry_on_timeout=True
 )
 
-planner_agent_instance = None
-def get_agent():
-    global planner_agent_instance
-    if planner_agent_instance is None:
-        print("🚀 Initialize the Agent when the first user sends a message....")
-        uri = os.getenv("MONGODB_URI") 
-        planner_agent_instance = TripPlannerAgent(mongodb_uri=uri)
-    return planner_agent_instance
+#planner_agent_instance = None
+#def get_agent():
+    #global planner_agent_instance
+    #if planner_agent_instance is None:
+        #print("🚀 Initialize the Agent when the first user sends a message....")
+        #uri = os.getenv("MONGODB_URI") 
+        #planner_agent_instance = TripPlannerAgent(mongodb_uri=uri)
+    #return planner_agent_instance
 
 class UserCreate(BaseModel):
     username: str
