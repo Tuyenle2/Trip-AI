@@ -90,8 +90,7 @@ YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
         
         If the user declines or wants to change the itinerary, acknowledge it, make the changes, and loop back to PHASE 1.
 """
-
-planner_agent = create_react_agent(llm, tools=[get_current_time], messages_modifier=planner_prompt)
+planner_agent = create_react_agent(llm, tools=[get_current_time], prompt=planner_prompt)
 async def call_planner(state: dict):
     print("✍️ [Planner Agent] Đang thiết kế lịch trình và xử lý thanh toán...")
     result = await planner_agent.ainvoke({"messages": state["messages"]})

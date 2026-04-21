@@ -59,7 +59,7 @@ def get_researcher_agent():
         QUAN TRỌNG: Chỉ trả về DỮ LIỆU THÔ (facts, giá cả, thời tiết). Tuyệt đối KHÔNG thiết kế lịch trình chi tiết."""
 
         # 3. Tạo Tác Nhân
-        _researcher_agent_instance = create_react_agent(llm, tools=researcher_tools, messages_modifier=researcher_prompt)
+        researcher_agent = create_react_agent(llm, tools=researcher_tools, prompt=researcher_prompt)
         
     return _researcher_agent_instance
 
