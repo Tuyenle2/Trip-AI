@@ -1,4 +1,3 @@
-
 # trip_planner_agent.py
 import os
 from datetime import datetime
@@ -7,17 +6,16 @@ import certifi
 from pymongo import MongoClient  
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool, tool
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import StateGraph, START, END, MessagesState
+from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.mongodb import MongoDBSaver 
-from mcp.client.sse import sse_client
-from mcp.client.session import ClientSession
-from langchain_mcp_adapters.tools import load_mcp_tools
 import contextlib
+
+# Import State và Node Researcher từ các file bạn đã tạo
+from app.state import AgentState
+from app.researcher import researcher_node
 
 @tool
 async def get_current_time() -> str:
@@ -28,56 +26,53 @@ async def get_current_time() -> str:
 class TripPlannerAgent:
     def __init__(self, mongodb_uri: str):
         self.mongodb_uri = mongodb_uri
-        self._setup_rag()
-        self._setup_tools()
-        self._setup_llm()
         
+        # 1. Khởi tạo DB & Checkpointer
         self.client = MongoClient(self.mongodb_uri, tls=True, tlsCAFile=certifi.where())
         self.memory = MongoDBSaver(self.client)
         
-        workflow = StateGraph(MessagesState)
+        # 2. Setup Tool & LLM riêng cho Planner (RAG giờ do Researcher đảm nhận)
+        self._setup_tools()
+        self._setup_llm()
+        
+        # ======================================================
+        # 3. XÂY DỰNG KIẾN TRÚC MULTI-AGENT GRAPH (CÓ ROUTER)
+        # ======================================================
+        workflow = StateGraph(AgentState)
+        
+        # Thêm các Agents / Nodes
+        workflow.add_node("researcher", researcher_node)
         workflow.add_node("planner", self.planner_nod)
         workflow.add_node("tools", ToolNode(self.tools)) 
-        workflow.add_edge(START, "planner")
+        
+        # Hàm định tuyến thông minh (Router)
+        def route_request(state: AgentState):
+            last_msg = state["messages"][-1].content.lower()
+            quick_words = ["cảm ơn", "chào", "hello", "hi", "ok", "yes", "đồng ý", "thanh toán", "book", "tuyệt", "good"]
+            # Nếu chỉ là chat phiếm hoặc chốt đơn -> Không cần tìm kiếm
+            if any(word in last_msg for word in quick_words) and len(last_msg) < 50:
+                print("🔀 [Router]: Lệnh cơ bản/Chốt đơn -> Chuyển thẳng đến Planner")
+                return "planner"
+            
+            # Ngược lại, kích hoạt Researcher đi tìm kiếm và đọc tài liệu FAISS
+            print("🔀 [Router]: Câu hỏi phức tạp -> Kích hoạt Researcher")
+            return "researcher"
+
+        # Kết nối các cạnh (Edges)
+        workflow.add_conditional_edges(
+            START,
+            route_request,
+            {
+                "researcher": "researcher",
+                "planner": "planner"
+            }
+        )
+        workflow.add_edge("researcher", "planner") # Xong Researcher thì truyền context_data cho Planner
         workflow.add_conditional_edges("planner", tools_condition)
         workflow.add_edge("tools", "planner")
 
+        # Biên dịch Graph
         self.app_graph = workflow.compile(checkpointer=self.memory)
-
-    def _setup_rag(self):
-        """RAG System for Reading Internal Travel Guides"""
-        knowledge_path = "app/data/travel_knowledge.txt"
-        if not os.path.exists("app/data"): os.makedirs("app/data")
-        if not os.path.exists(knowledge_path):
-            with open(knowledge_path, "w", encoding="utf-8") as f:
-                f.write("Cancellation Policy: Cancellation before 7 days allows 100% refund.\n")
-
-        with open(knowledge_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        splits = text_splitter.create_documents([text])
-
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
-        vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
-        retriever = vectorstore.as_retriever()
-
-      
-        def query_knowledge(query: str) -> str:
-            docs = retriever.invoke(query)
-            return "\n\n".join([doc.page_content for doc in docs])
-            
-     
-        async def aquery_knowledge(query: str) -> str:
-            docs = await retriever.ainvoke(query)
-            return "\n\n".join([doc.page_content for doc in docs])
-
-        self.rag_tool = Tool(
-            name="internal_travel_knowledge",
-            func=query_knowledge,
-            coroutine=aquery_knowledge,
-            description="Use this tool to look up company policies, cancellation rules, and exclusive travel guides."
-        )
 
     def _setup_tools(self):
         search = SerpAPIWrapper()
@@ -88,7 +83,6 @@ class TripPlannerAgent:
                 coroutine=search.arun,
                 description="Search for flight information, weather, and prices online."
             ),
-            self.rag_tool,
             get_current_time
         ]
 
@@ -114,15 +108,13 @@ class TripPlannerAgent:
         [COMPLEX Q&A PROCESS]
         Do not rush into building an itinerary. To design a perfect trip, you must sequentially extract ALL 4 of the following elements by asking the user:
         - Element 1: Destination and Time (Ask for exact dates).
-        - Element 2: Number of people & Demographics (Are there children or elderly? This ensures the itinerary is not physically exhausting).
+        - Element 2: Number of people & Demographics (Are there children or elderly?).
         - Element 3: Budget (Budget/Backpacker, Standard, or 5-Star Luxury?).
         - Element 4: Preferences & Dietary Restrictions (Nature vs. culture? Vegetarian/Seafood allergies?).
 
         [ITINERARY EXPORT & PAYMENT PROCESS]
         Only after gathering all 4 elements above, use `Google Search` to build the itinerary.
-        - The itinerary must be logical: If there are elderly travelers, do not schedule mountain climbing. If they are vegetarian, find vegetarian restaurants.
         - Output the detailed itinerary using the exact template below:
-
 
         ### ✈️ Proposed Flights
         * **Route:** [From where to where]
@@ -132,31 +124,17 @@ class TripPlannerAgent:
 
         ### 🏨 Proposed Hotels / Accommodations
         * **Name:** [Accommodation name]
-        * **Rating:** ⭐ [Number of stars] ([Number of reviews] reviews)
+        * **Rating:** ⭐ [Number of stars]
         * **Address:** 📍 [Address]
         * **Room Price:** 💵 [Estimated price]
         * 🔗 [View & Book on Expedia](https://www.expedia.com/Hotel-Search?destination=[name_replacing_spaces_with_plus_signs])
 
         ### 🗺️ Detailed Itinerary
-        (Divide by day. For each day, clearly separate Morning/Afternoon/Evening. Every location must include a Rating and its own Google Maps Link)
+        (Divide by day. For each day, clearly separate Morning/Afternoon/Evening)
         **Day 1: [Title of Day 1]**
         * **Morning:** * **[Location Name 1]** -
+                - ⭐ [Number of stars] - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/search/?api=1&query=[tên_địa_điểm])
 
-[image of location]
-- ⭐ [Number of stars] ([Number of reviews] reviews) - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/search/?api=1&query=[tên_địa_điểm])
-        * **Afternoon:** * **[Location Name 2]** -
-
-[image of location]
-- ⭐ [Number of stars] ([Number of reviews] reviews) - [1 descriptive sentence]. 📍 [Open in Maps](https://www.google.com/maps/dir/Tháp+Đôi/Ghềnh+Ráng+Tiên+Sa)
-        * **Evening:** Enjoy local cuisine or take a walk...
-
-        ### 🎟️ Highlighted Activities & Tours
-        * **Tour Name:** [Activity name]-[some images of the tour]
-        * 🔗 [Book Tour on Viator](https://www.viator.com/searchResults/all?text=[english_tour_keyword])
-
-        IMPORTANT: ALWAYS default to adding 1 hidden line containing a list of ALL locations to draw the map:
-        [MAP_PLACES: Location 1, Location 2, Location 3...]
-                              
         ### 🎟️ Highlighted Activities & Tours
         * **Tour Name:** [Activity name]-[some images of the tour]
         * 🔗 [Book Tour on Viator](https://www.viator.com/searchResults/all?text=[english_tour_keyword])
@@ -174,70 +152,21 @@ class TripPlannerAgent:
         PHASE 2 - EXECUTE CHECKOUT:
         If and ONLY IF the human user replies with an explicit agreement (e.g., "Yes", "Ok", "Book it", "I want to checkout"), you will output the payment tag exactly like this:
         [PAYMENT_FORM: Service Name | Price]
-        (Example: [PAYMENT_FORM: Anya Hotel Quy Nhon | 2,500,000 VND])
         
-        If the user declines or wants to change the itinerary, acknowledge it, make the changes, and loop back to PHASE 1.
+        If the user declines, make the changes, and loop back to PHASE 1.
         """)
 
-    async def planner_nod(self, state: MessagesState):
-        messages = [self._get_system_prompt()] + state["messages"]
+    async def planner_nod(self, state: AgentState):
+        messages = [self._get_system_prompt()]
+        
+        # NHÚNG DỮ LIỆU TỪ RESEARCHER: Nếu Router điều phối qua Researcher, nó sẽ nhả Context Data vào đây cho Planner đọc
+        if "context_data" in state and state["context_data"]:
+            messages.append(SystemMessage(
+                content=f"📖 [INTERNAL DATA FROM RESEARCHER (RAG)]:\n{state['context_data']}\n\nUse this information to assist the user if relevant."
+            ))
+            
+        messages.extend(state["messages"])
         response = await self.llm_with_tools.ainvoke(messages)
+        
+        # Planner chỉ trả về tin nhắn (Ghi đè lên list messages), context_data tự động bị xóa sau 1 lượt nhờ cấu trúc Reducer
         return {"messages": [response]}
-
-
-
-agent_instance = None
-is_initializing = False
-
-mcp_exit_stack = contextlib.AsyncExitStack() 
-
-async def planner_nod(state: MessagesState):
-    global agent_instance
-    global is_initializing
-    global mcp_exit_stack
-
-    if agent_instance is None:
-        if is_initializing:
-            import asyncio
-            while agent_instance is None:
-                await asyncio.sleep(0.5)
-        else:
-            is_initializing = True
-            print("🚀 Loading TripPlannerAgent...")
-            try:
-                import os
-                uri = os.getenv("MONGODB_URI")
-                if not uri:
-                    raise ValueError("Chưa cấu hình MONGODB_URI!")
-                
-                temp_agent = TripPlannerAgent(mongodb_uri=uri)
-                mcp_server_url = os.getenv("MCP_SERVER_URL") 
-                
-                if mcp_server_url:
-                    print(f"🔗 Connecting to MCP Server: {mcp_server_url}")
-                    # Connect using SSE (Server-Sent Events) protocol
-                    streams = await mcp_exit_stack.enter_async_context(sse_client(mcp_server_url))
-                    session = await mcp_exit_stack.enter_async_context(ClientSession(streams[0], streams[1]))
-                    await session.initialize()
-                    
-                    mcp_tools = await load_mcp_tools(session)
-                    
-                    temp_agent.tools.extend(mcp_tools)
-                    
-                    temp_agent.llm_with_tools = temp_agent.llm.bind_tools(temp_agent.tools)
-                    print(f"✅ Successfully loaded {len(mcp_tools)} tools from MCP Server!")
-
-                agent_instance = temp_agent
-                print("✅ Successfully initialized TripPlannerAgent!")
-            except Exception as e:
-                print(f"❌ Agent/MCP Initialization Error: {e}")
-                is_initializing = False
-                raise e
-            finally:
-                is_initializing = False
-    
-    return await agent_instance.planner_nod(state)
-
-async def achat_stream(thread_id: str, user_input: str):
-    """Async function for streaming chat responses (for backward compatibility if routes.py still calls achat_stream)"""
-    pass
