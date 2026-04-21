@@ -1,7 +1,7 @@
-# app/agents/planner.py
 from datetime import datetime
 import pytz
 from langchain_core.tools import tool
+from langchain_core.messages import SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 
@@ -90,8 +90,15 @@ YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
         
         If the user declines or wants to change the itinerary, acknowledge it, make the changes, and loop back to PHASE 1.
 """
-planner_agent = create_react_agent(llm, tools=[get_current_time], prompt=planner_prompt)
+
+# KHỞI TẠO BỎ TRỐNG THAM SỐ PROMPT
+planner_agent = create_react_agent(llm, tools=[get_current_time])
+
 async def call_planner(state: dict):
     print("✍️ [Planner Agent] Đang thiết kế lịch trình và xử lý thanh toán...")
-    result = await planner_agent.ainvoke({"messages": state["messages"]})
+    
+    # ÉP SYSTEM PROMPT VÀO ĐẦU LỊCH SỬ TIN NHẮN
+    input_messages = [SystemMessage(content=planner_prompt)] + state["messages"]
+    
+    result = await planner_agent.ainvoke({"messages": input_messages})
     return {"messages": [result["messages"][-1]]}

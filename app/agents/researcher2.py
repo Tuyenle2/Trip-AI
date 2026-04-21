@@ -1,12 +1,16 @@
 import os
 from langchain_community.utilities import SerpAPIWrapper
 from langchain_core.tools import Tool
+from langchain_core.messages import SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.prebuilt import create_react_agent
 
-# Biến toàn cục để lưu trữ Agent
+researcher_prompt = """Bạn là Tác nhân Nghiên cứu Dữ liệu Du lịch (Researcher Agent) của Navia.
+Nhiệm vụ: Sử dụng công cụ (Google Search, Internal Knowledge) để tìm kiếm thông tin theo yêu cầu của khách hàng.
+QUAN TRỌNG: Chỉ trả về DỮ LIỆU THÔ (facts, giá cả, thời tiết). Tuyệt đối KHÔNG thiết kế lịch trình chi tiết."""
+
 _researcher_agent_instance = None
 
 def get_researcher_agent():
@@ -14,7 +18,6 @@ def get_researcher_agent():
     if _researcher_agent_instance is None:
         print("🚀 Khởi tạo Researcher Agent và nạp dữ liệu RAG lần đầu tiên...")
         
-        # 1. Khởi tạo FAISS
         knowledge_path = "app/data/travel_knowledge.txt"
         if not os.path.exists("app/data"): 
             os.makedirs("app/data")
@@ -42,7 +45,6 @@ def get_researcher_agent():
             description="Use this tool to look up company policies, cancellation rules, and exclusive travel guides."
         )
 
-        # 2. Khởi tạo Google Search
         search = SerpAPIWrapper()
         google_search_tool = Tool(
             name="google_search", 
@@ -54,18 +56,16 @@ def get_researcher_agent():
         researcher_tools = [google_search_tool, rag_tool]
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 
-        researcher_prompt = """Bạn là Tác nhân Nghiên cứu Dữ liệu Du lịch (Researcher Agent) của Navia.
-        Nhiệm vụ: Sử dụng công cụ (Google Search, Internal Knowledge) để tìm kiếm thông tin theo yêu cầu của khách hàng.
-        QUAN TRỌNG: Chỉ trả về DỮ LIỆU THÔ (facts, giá cả, thời tiết). Tuyệt đối KHÔNG thiết kế lịch trình chi tiết."""
-
-        # 3. Tạo Tác Nhân
-        researcher_agent = create_react_agent(llm, tools=researcher_tools, prompt=researcher_prompt)
+        _researcher_agent_instance = create_react_agent(llm, tools=researcher_tools)
         
     return _researcher_agent_instance
 
 async def call_researcher(state: dict):
     print("🔍 [Researcher Agent] Đang tra cứu dữ liệu...")
-    # Lấy agent (Chỉ gọi API nạp dữ liệu ở lần chạy đầu tiên, các lần sau gọi trong 0.1s)
     agent = get_researcher_agent()
-    result = await agent.ainvoke({"messages": state["messages"]})
+    
+    # ÉP SYSTEM PROMPT VÀO ĐẦU LỊCH SỬ TIN NHẮN (Bypass lỗi thư viện)
+    input_messages = [SystemMessage(content=researcher_prompt)] + state["messages"]
+    
+    result = await agent.ainvoke({"messages": input_messages})
     return {"messages": [result["messages"][-1]]}
