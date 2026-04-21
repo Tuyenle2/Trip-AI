@@ -52,7 +52,7 @@ def get_researcher_agent():
         )
 
         researcher_tools = [google_search_tool, rag_tool]
-        llm = ChatGoogleGenerativeAI(model="gemini-3.3-flash-lite-preview", temperature=0.1)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0.1)
         _researcher_agent_instance = create_react_agent(llm, tools=researcher_tools)
         
     return _researcher_agent_instance

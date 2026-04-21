@@ -11,7 +11,7 @@ async def get_current_time() -> str:
     vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
     return f"The current time in Vietnam is: {datetime.now(vn_tz).strftime('%A, %d/%m/%Y %H:%M:%S')}"
 
-llm = ChatGoogleGenerativeAI(model="gemini-3.3-flash-lite-preview", temperature=0.3)
+llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0.3)
 
 planner_prompt = """
 YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
