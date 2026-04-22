@@ -405,12 +405,19 @@ async def upload_travel_document(file: UploadFile = File(...)):
         Văn bản: {content_text[:2000]} # Chỉ đọc 2000 ký tự đầu để tiết kiệm token
         """
         
-        validation_result = validator_llm.invoke(validation_prompt).content.strip().upper()
+        ai_response = validator_llm.invoke(validation_prompt)
+        
+        if isinstance(ai_response.content, list):
+            extracted_text = "".join([item.get("text", "") for item in ai_response.content if isinstance(item, dict)])
+        else:
+            extracted_text = str(ai_response.content)
+            
+        validation_result = extracted_text.strip().upper()
         
         if "NO" in validation_result:
             raise HTTPException(
-                status_code=403, 
-                detail="Tài liệu bị từ chối. Hệ thống chỉ phân tích các tài liệu liên quan đến Du lịch (vé, lịch trình, cẩm nang...)."
+                status_code=400, 
+                detail="Nhắc nhở nhẹ: Hệ thống Navia hiện tại chỉ hỗ trợ phân tích các tài liệu về Du lịch (như vé máy bay, lịch trình, cẩm nang...). Bạn vui lòng kiểm tra và tải lên đúng loại tài liệu nhé!"
             )
 
         add_document_to_rag(content_text)
