@@ -20,3 +20,4 @@ bcrypt==3.2.2
 redis
 mcp
 langchain-mcp-adapters
+pypdf

@@ -7,12 +7,18 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.prebuilt import create_react_agent
 
-researcher_prompt = """You are a Travel Data Research Agent (Researcher Agent) for Navia.
-Responsibilities: Use tools (Google Search, Internal Knowledge, SerpAPI) to find information as requested by clients.
-IMPORTANT: Only return RAW DATA (facts, prices, weather). Absolutely DO NOT design detailed itineraries."""
+researcher_prompt = """Bạn là Tác nhân Nghiên cứu Dữ liệu Du lịch (Researcher Agent) của Navia.
+Nhiệm vụ: Sử dụng công cụ (Google Search, Internal Knowledge) để tìm kiếm thông tin theo yêu cầu của khách hàng.
+ĐẶC BIỆT: Nếu có dữ liệu từ tài liệu do người dùng tải lên, hãy ưu tiên sử dụng thông tin đó để phân tích và trả lời.
+QUAN TRỌNG: Chỉ trả về DỮ LIỆU THÔ (facts, giá cả, thời tiết). Tuyệt đối KHÔNG thiết kế lịch trình chi tiết."""
+
 _researcher_agent_instance = None
+_global_vectorstore = None 
+
 def get_researcher_agent():
     global _researcher_agent_instance
+    global _global_vectorstore
+    
     if _researcher_agent_instance is None:
         print("Initialize the Researcher Agent and load the RAG data for the first time...")
         
@@ -29,8 +35,9 @@ def get_researcher_agent():
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         splits = text_splitter.create_documents([text])
         embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
-        vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+        
+        _global_vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
+        retriever = _global_vectorstore.as_retriever(search_kwargs={"k": 3})
 
         async def aquery_knowledge(query: str) -> str:
             docs = await retriever.ainvoke(query)
@@ -40,7 +47,7 @@ def get_researcher_agent():
             name="internal_travel_knowledge",
             func=lambda x: x,
             coroutine=aquery_knowledge,
-            description="Use this tool to look up company policies, cancellation rules, and exclusive travel guides."
+            description="Use this tool to read company policies and user-uploaded documents."
         )
 
         search = SerpAPIWrapper()
@@ -52,13 +59,25 @@ def get_researcher_agent():
         )
 
         researcher_tools = [google_search_tool, rag_tool]
-        llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0.1)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
+
         _researcher_agent_instance = create_react_agent(llm, tools=researcher_tools)
         
     return _researcher_agent_instance
 
+def add_document_to_rag(text_content: str):
+    global _global_vectorstore
+    if _global_vectorstore is None:
+        get_researcher_agent() 
+        
+    print("Embedding document to FAISS RAG...")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splits = text_splitter.create_documents([f"[DOCUMENT USERS UPLOAD]:\n{text_content}"])
+    _global_vectorstore.add_documents(splits)
+    print("✅ Đã cập nhật FAISS thành công!")
+
 async def call_researcher(state: dict):
-    print("🔍 [Researcher Agent] Data being retrieved...")
+    print("🔍 [Researcher Agent] Retrivalling data from document....")
     agent = get_researcher_agent()
     input_messages = [SystemMessage(content=researcher_prompt)] + state["messages"]
     result = await agent.ainvoke({"messages": input_messages})

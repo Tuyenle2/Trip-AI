@@ -15,6 +15,11 @@ from app.core.security import SecurityGuard
 from app.core.main_graph import get_agent
 from app.auth import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 import redis.asyncio as aioredis 
+from fastapi import File, UploadFile
+import PyPDF2
+import io
+from app.agents.researcher import add_document_to_rag 
+from langchain_google_genai import ChatGoogleGenerativeAI 
 
 router = APIRouter()
 load_dotenv()
@@ -371,3 +376,50 @@ async def admin_reply_message(req: AdminReplyRequest):
         "created_at": datetime.now()
     })
     return {"status": "success", "message": "Admin message has been sent"}
+
+@router.post("/upload-doc")
+async def upload_travel_document(file: UploadFile = File(...)):
+    try:
+        content_text = ""
+        if file.filename.endswith(".txt"):
+            content = await file.read()
+            content_text = content.decode("utf-8")
+        elif file.filename.endswith(".pdf"):
+            content = await file.read()
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            for page in pdf_reader.pages:
+                content_text += page.extract_text() + "\n"
+        else:
+            raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .txt và .pdf")
+
+        if len(content_text.strip()) < 10:
+            raise HTTPException(status_code=400, detail="Tài liệu quá ngắn hoặc không đọc được chữ.")
+
+        print("🛡️ Đang kiểm duyệt nội dung tài liệu...")
+        validator_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+        validation_prompt = f"""
+        Bạn là một bộ lọc nội dung. Hãy đọc đoạn văn bản sau và cho biết nó có liên quan đến: Du lịch, lịch trình, khách sạn, chuyến bay, địa điểm tham quan, vé máy bay, hoặc đánh giá nhà hàng không?
+        Nếu CÓ liên quan đến du lịch, chỉ trả lời duy nhất: "YES".
+        Nếu KHÔNG liên quan (ví dụ: tài liệu y tế, toán học, code, hợp đồng không liên quan), chỉ trả lời duy nhất: "NO".
+        
+        Văn bản: {content_text[:2000]} # Chỉ đọc 2000 ký tự đầu để tiết kiệm token
+        """
+        
+        validation_result = validator_llm.invoke(validation_prompt).content.strip().upper()
+        
+        if "NO" in validation_result:
+            raise HTTPException(
+                status_code=403, 
+                detail="Tài liệu bị từ chối. Hệ thống chỉ phân tích các tài liệu liên quan đến Du lịch (vé, lịch trình, cẩm nang...)."
+            )
+
+        add_document_to_rag(content_text)
+
+        return {
+            "status": "success", 
+            "message": f"Tài liệu '{file.filename}' đã được AI nạp vào bộ nhớ. Bạn có thể đặt câu hỏi về tài liệu này ngay bây giờ!"
+        }
+
+    except Exception as e:
+        print(f"Lỗi Upload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
