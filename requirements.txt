@@ -21,3 +21,4 @@ redis
 mcp
 langchain-mcp-adapters
 pypdf
+PyPDF2
