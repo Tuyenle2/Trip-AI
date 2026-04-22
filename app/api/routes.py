@@ -396,7 +396,7 @@ async def upload_travel_document(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Tài liệu quá ngắn hoặc không đọc được chữ.")
 
         print("🛡️ Đang kiểm duyệt nội dung tài liệu...")
-        validator_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+        validator_llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0)
         validation_prompt = f"""
         Bạn là một bộ lọc nội dung. Hãy đọc đoạn văn bản sau và cho biết nó có liên quan đến: Du lịch, lịch trình, khách sạn, chuyến bay, địa điểm tham quan, vé máy bay, hoặc đánh giá nhà hàng không?
         Nếu CÓ liên quan đến du lịch, chỉ trả lời duy nhất: "YES".
