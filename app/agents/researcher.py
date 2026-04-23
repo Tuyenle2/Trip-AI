@@ -6,6 +6,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.prebuilt import create_react_agent
+import urllib.request
+import urllib.parse
+import re
 from app.core.logger import get_logger
 logger = get_logger(__name__)
 
@@ -55,22 +58,39 @@ def get_researcher_agent():
             description="Use this tool to read company policies and user-uploaded documents."
         )
         
-        # Sửa lại công cụ google_search_tool
-        search = SerpAPIWrapper()
-
-        def search_with_media(query: str):
-            # Tìm kiếm thông tin tổng quát
-            results = search.run(query)
-            # Tìm kiếm link hình ảnh (sử dụng tính năng search_type của SerpAPI)
-            image_results = search.results(f"{query} photos")
-            images = [item.get("thumbnail") for item in image_results.get("images_results", [])[:3]]
+        def enhanced_search(query: str) -> str:
+            # 1. Tìm thông tin chữ
+            text_search = SerpAPIWrapper()
+            text_result = text_search.run(query)
             
-            return f"Information: {results}\nImages: {', '.join(images)}"
+            # 2. Tìm Link ảnh thật (chất lượng cao)
+            image_url = ""
+            try:
+                img_search = SerpAPIWrapper(params={"tbm": "isch"})
+                img_raw = img_search.results(query + " travel high quality")
+                if "images_results" in img_raw and len(img_raw["images_results"]) > 0:
+                    image_url = img_raw["images_results"][0]["original"]
+            except Exception:
+                image_url = "https://images.unsplash.com/photo-1488085061387-422e29b40080?w=800" # Ảnh mặc định
+                
+            # 3. Tìm Video ID YouTube thật
+            video_id = ""
+            try:
+                search_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query + " du lịch review 4k")
+                req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0'})
+                html = urllib.request.urlopen(req, timeout=5)
+                video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
+                if video_ids:
+                    video_id = video_ids[0]
+            except Exception:
+                video_id = "jXj_nQxYQNY" # Video mặc định
+
+            return f"THÔNG TIN: {text_result}\n\n[QUAN TRỌNG] LINK ẢNH THẬT ĐỂ DÙNG: {image_url}\n[QUAN TRỌNG] YOUTUBE ID THẬT ĐỂ DÙNG: {video_id}"
 
         google_search_tool = Tool(
             name="google_search", 
-            func=search_with_media, 
-            description="Search for flight information, weather, and prices online. Returns both text and relevant images."
+            func=enhanced_search, 
+            description="Tìm thông tin địa điểm và tự động đính kèm Link Ảnh và Video YouTube thực tế."
         )
 
         researcher_tools = [google_search_tool, rag_tool]
