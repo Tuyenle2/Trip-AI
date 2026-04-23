@@ -54,13 +54,23 @@ def get_researcher_agent():
             coroutine=aquery_knowledge,
             description="Use this tool to read company policies and user-uploaded documents."
         )
-
+        
+        # Sửa lại công cụ google_search_tool
         search = SerpAPIWrapper()
+
+        def search_with_media(query: str):
+            # Tìm kiếm thông tin tổng quát
+            results = search.run(query)
+            # Tìm kiếm link hình ảnh (sử dụng tính năng search_type của SerpAPI)
+            image_results = search.results(f"{query} photos")
+            images = [item.get("thumbnail") for item in image_results.get("images_results", [])[:3]]
+            
+            return f"Information: {results}\nImages: {', '.join(images)}"
+
         google_search_tool = Tool(
             name="google_search", 
-            func=search.run, 
-            coroutine=search.arun,
-            description="Search for flight information, weather, and prices online."
+            func=search_with_media, 
+            description="Search for flight information, weather, and prices online. Returns both text and relevant images."
         )
 
         researcher_tools = [google_search_tool, rag_tool]
