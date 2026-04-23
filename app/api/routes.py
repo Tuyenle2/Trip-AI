@@ -20,7 +20,8 @@ import PyPDF2
 import io
 from app.agents.researcher import add_document_to_rag 
 from langchain_google_genai import ChatGoogleGenerativeAI 
-
+from app.core.logger import get_logger
+logger = get_logger(__name__)
 router = APIRouter()
 load_dotenv()
 
@@ -132,7 +133,7 @@ async def api_chat_stream(request: ChatRequest):
         try:
             trigger_ai = True
             if "@ADMIN" in text_upper:
-              
+                logger.info(f"🔍 [Chat Stream] User mentioned ADMIN in message: {request.message}")
                 online_admins_count = await redis_client.scard("online_admins")
                 
                 if online_admins_count > 0:
@@ -180,8 +181,7 @@ async def api_chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
-            print("=== CRASH ERROR IN MULTI-AGENT GRAPH ===")
-            traceback.print_exc()
+            logger.error("=== CRASH ERROR IN MULTI-AGENT GRAPH ===", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -215,7 +215,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
     is_current_user_admin = "admin" in username.lower()
     if is_current_user_admin:
         await redis_client.sadd("online_admins", username)
-        print(f"👨‍💼 Admin {username} online!")
+        logger.info(f"👨‍💼 Admin {username} online!")
     agent = get_agent()
     db = agent.client.get_database("ai_trip_planner_db")
     room_col = db.get_collection("room_messages") 
@@ -225,7 +225,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
         for msg in history:
             await websocket.send_text(json.dumps(msg))
     except Exception as e:
-        print(f"History Error: {e}")
+        logger.error(f"History Error: {room_id}: {e}", exc_info=True)
         
         
     async def redis_listener():
@@ -313,7 +313,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
         listener_task.cancel()
         if is_current_user_admin:
             await redis_client.srem("online_admins", username)
-            print(f"👨‍💼 Admin {username} offline!")
+            logger.info(f"👨‍💼 Admin {username} offline!")
 @router.post("/save_plan")
 def save_plan(req: SavePlanRequest):
     agent = get_agent()
@@ -390,19 +390,18 @@ async def upload_travel_document(file: UploadFile = File(...)):
             for page in pdf_reader.pages:
                 content_text += page.extract_text() + "\n"
         else:
-            raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .txt và .pdf")
+            raise HTTPException(status_code=400, detail="Only supports .txt ")
 
         if len(content_text.strip()) < 10:
-            raise HTTPException(status_code=400, detail="Tài liệu quá ngắn hoặc không đọc được chữ.")
+            raise HTTPException(status_code=400, detail="The document is too short or the text is illegible.")
 
-        print("🛡️ Đang kiểm duyệt nội dung tài liệu...")
+        logger.info("🛡️ The document's content is currently being reviewed...")
         validator_llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0)
         validation_prompt = f"""
-        Bạn là một bộ lọc nội dung. Hãy đọc đoạn văn bản sau và cho biết nó có liên quan đến: Du lịch, lịch trình, khách sạn, chuyến bay, địa điểm tham quan, vé máy bay, hoặc đánh giá nhà hàng không?
-        Nếu CÓ liên quan đến du lịch, chỉ trả lời duy nhất: "YES".
-        Nếu KHÔNG liên quan (ví dụ: tài liệu y tế, toán học, code, hợp đồng không liên quan), chỉ trả lời duy nhất: "NO".
-        
-        Văn bản: {content_text[:2000]} # Chỉ đọc 2000 ký tự đầu để tiết kiệm token
+        You are a content filter. Read the following text and indicate whether it relates to: Travel, itineraries, hotels, flights, tourist attractions, airline tickets, or restaurant reviews?
+        If YES it relates to travel, answer only: "YES".
+        If NOT it relates (e.g., medical documents, mathematics, code, contracts are irrelevant), answer only: "NO".
+        Text: {content_text[:2000]} # Only read the first 2000 characters to save tokens
         """
         
         ai_response = validator_llm.invoke(validation_prompt)
@@ -417,16 +416,16 @@ async def upload_travel_document(file: UploadFile = File(...)):
         if "NO" in validation_result:
             raise HTTPException(
                 status_code=400, 
-                detail="Nhắc nhở nhẹ: Hệ thống Navia hiện tại chỉ hỗ trợ phân tích các tài liệu về Du lịch (như vé máy bay, lịch trình, cẩm nang...). Bạn vui lòng kiểm tra và tải lên đúng loại tài liệu nhé!"
+                detail="The system currently only supports analyzing travel-related documents (such as airline tickets, itineraries, travel guides, etc.). Please check and upload the correct type of document."
             )
 
         add_document_to_rag(content_text)
 
         return {
             "status": "success", 
-            "message": f"Tài liệu '{file.filename}' đã được AI nạp vào bộ nhớ. Bạn có thể đặt câu hỏi về tài liệu này ngay bây giờ!"
+            "message": f"The document '{file.filename}' has been uploaded to the AI memory. You can now ask questions about this document!"
         }
 
     except Exception as e:
-        print(f"Lỗi Upload: {e}")
+        logger.info(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

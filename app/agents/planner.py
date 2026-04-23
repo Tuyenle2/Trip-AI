@@ -4,7 +4,9 @@ from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
+from app.core.logger import get_logger
 
+logger = get_logger(__name__)
 @tool
 async def get_current_time() -> str:
     """Use this tool only when you need to know the current date and time to calculate departure dates, check weather, or flight prices."""
@@ -89,7 +91,7 @@ YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
 planner_agent = create_react_agent(llm, tools=[get_current_time])
 
 async def call_planner(state: dict):
-    print("✍️ [Planner Agent] Designing the schedule and processing payments...")
+    logger.info("✍️ [Planner Agent] Designing the schedule and processing payments...")
     input_messages = [SystemMessage(content=planner_prompt)] + state["messages"]
     result = await planner_agent.ainvoke({"messages": input_messages})
     return {"messages": [result["messages"][-1]]}
