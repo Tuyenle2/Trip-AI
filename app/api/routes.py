@@ -17,6 +17,7 @@ from app.auth import verify_password, get_password_hash, create_access_token, SE
 import redis.asyncio as aioredis 
 from fastapi import File, UploadFile
 import PyPDF2
+from langgraph.types import Command 
 import io
 from app.agents.researcher import add_document_to_rag 
 from langchain_google_genai import ChatGoogleGenerativeAI 
@@ -112,6 +113,7 @@ def api_get_messages(thread_id: str):
 
 
 @router.post("/chat/stream")
+
 async def api_chat_stream(request: ChatRequest):
     if not SecurityGuard.is_input_safe(request.message):
         raise HTTPException(status_code=400, detail="Violation of Guardrails")
@@ -155,10 +157,24 @@ async def api_chat_stream(request: ChatRequest):
 
             if trigger_ai:
                 full_text = ""
+                
+                # --- THÊM ĐOẠN KIỂM TRA TRẠNG THÁI HITL Ở ĐÂY ---
+                config = {"configurable": {"thread_id": request.thread_id}}
+                current_state = agent.app_graph.get_state(config)
+                
+                if current_state.next:
+                    logger.info("🚦 [HITL] Graph is paused. Resume the stream...")
+                    is_approved = any(word in text_upper for word in ["YES", "OK", "AGREE", "BOOK", "THANH TOÁN", "ĐỒNG Ý", "TẠO"])
+                    input_data = Command(resume={"approved": is_approved})
+                else:
+                    # Nếu Graph bình thường, nhét tin nhắn vào
+                    input_data = {"messages": [HumanMessage(content=request.message)]}
+                # ------------------------------------------------
+
                 async for event in agent.app_graph.astream_events(
-                    {"messages": [HumanMessage(content=request.message)]},
+                    input_data, # DÙNG input_data THAY VÌ NHÉT TRỰC TIẾP TIN NHẮN
                     version="v2",
-                    config={"configurable": {"thread_id": request.thread_id}}
+                    config=config
                 ):
                     kind = event["event"]
                     if kind == "on_tool_start":
@@ -281,16 +297,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                 }))
                 
                 try:
-                    recent_msgs = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", -1).limit(10))
-                    recent_msgs.reverse()
-                    context = "\n".join([f"{m['username']}: {m['message']}" for m in recent_msgs])
+                    config = {"configurable": {"thread_id": f"room_{room_id}"}}
+                    current_state = agent.app_graph.get_state(config)
                     
+                    if current_state.next:
+                        logger.info("[HITL]Restore the flow in the Group Chat...")
+                        is_approved = any(word in text_upper for word in ["YES", "OK", "AGREE", "BOOK", "THANH TOÁN", "ĐỒNG Ý", "TẠO"])
+                        input_data = Command(resume={"approved": is_approved})
+                    else:
+                        recent_msgs = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", -1).limit(10))
+                        recent_msgs.reverse()
+                        context = "\n".join([f"{m['username']}: {m['message']}" for m in recent_msgs])
+                        input_data = {"messages": [HumanMessage(content=f"Group Chat Context:\n{context}\n\nUser Request: {data}\n\n(Remember to ONLY reply in English)")]}
+                    
+
                     full_text = ""
-                    # Gọi Agent AI 
                     async for event in agent.app_graph.astream_events(
-                        {"messages": [HumanMessage(content=f"Group Chat Context:\n{context}\n\nUser Request: {data}\n\n(Remember to ONLY reply in English)")]},
+                        input_data, 
                         version="v2",
-                        config={"configurable": {"thread_id": f"room_{room_id}"}}
+                        config=config
                     ):
                         if event["event"] == "on_chat_model_stream":
                             chunk_content = event["data"]["chunk"].content
