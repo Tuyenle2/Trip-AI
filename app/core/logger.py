@@ -1,8 +1,6 @@
 # app/core/logger.py
 import logging
 import sys
-
-# Tạo một Formatter tùy chỉnh để thêm màu sắc khi in ra Console
 class CustomFormatter(logging.Formatter):
     grey = "\x1b[38;20m"
     blue = "\x1b[34;20m"
@@ -10,8 +8,7 @@ class CustomFormatter(logging.Formatter):
     red = "\x1b[31;20m"
     bold_red = "\x1b[31;1m"
     reset = "\x1b[0m"
-    
-    # Định dạng: [Thời gian] - [Tên file] - [Cấp độ] - [Nội dung]
+  
     format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     FORMATS = {
@@ -28,14 +25,11 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 def get_logger(name: str):
-    """Hàm khởi tạo logger chuyên nghiệp"""
+    """Hàm khởi tạo logger"""
     logger = logging.getLogger(name)
-    
-    # Tránh việc add handler nhiều lần nếu import ở nhiều nơi
+  
     if not logger.handlers:
-        logger.setLevel(logging.INFO) # Mức độ log mặc định
-        
-        # Cấu hình in ra Console (Terminal/Render Log)
+        logger.setLevel(logging.INFO)
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(CustomFormatter())

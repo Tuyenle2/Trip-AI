@@ -59,22 +59,18 @@ def get_researcher_agent():
         )
         
         def enhanced_search(query: str) -> str:
-            # 1. Tìm thông tin chữ
             text_search = SerpAPIWrapper()
             text_result = text_search.run(query)
-            
-            # 2. Tìm Link ảnh thật (chất lượng cao)
-            image_url = ""
+            image_url = "NONE"
             try:
                 img_search = SerpAPIWrapper(params={"tbm": "isch"})
                 img_raw = img_search.results(query + " travel high quality")
                 if "images_results" in img_raw and len(img_raw["images_results"]) > 0:
                     image_url = img_raw["images_results"][0]["original"]
             except Exception:
-                image_url = "https://images.unsplash.com/photo-1488085061387-422e29b40080?w=800" # Ảnh mặc định
+                pass 
                 
-            # 3. Tìm Video ID YouTube thật
-            video_id = ""
+            video_id = "NONE"
             try:
                 search_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query + " du lịch review 4k")
                 req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -83,14 +79,13 @@ def get_researcher_agent():
                 if video_ids:
                     video_id = video_ids[0]
             except Exception:
-                video_id = "jXj_nQxYQNY" # Video mặc định
-
-            return f"THÔNG TIN: {text_result}\n\n[QUAN TRỌNG] LINK ẢNH THẬT ĐỂ DÙNG: {image_url}\n[QUAN TRỌNG] YOUTUBE ID THẬT ĐỂ DÙNG: {video_id}"
+                pass 
+            return f"INFORMATION: {text_result}\n\n[IMPORTANT] REAL IMAGE LINK FOR USE: {image_url}\n[IMPORTANT] REAL YOUTUBE ID FOR USE: {video_id}"
 
         google_search_tool = Tool(
             name="google_search", 
             func=enhanced_search, 
-            description="Tìm thông tin địa điểm và tự động đính kèm Link Ảnh và Video YouTube thực tế."
+            description="Search for location information and automatically attach real Image and YouTube Video links."
         )
 
         researcher_tools = [google_search_tool, rag_tool]

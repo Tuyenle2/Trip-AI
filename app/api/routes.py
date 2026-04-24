@@ -260,14 +260,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                 online_admins_count = await redis_client.scard("online_admins")
                 
                 if online_admins_count > 0:
-                    # Có Admin online -> Thông báo chờ, KHÔNG gọi AI
                     await redis_client.publish(f"chat_{room_id}", json.dumps({
                         "room_id": room_id, "username": "SYSTEM ⚙️", 
                         "message": "👨‍💼 I've connected with the administrator. Please wait a moment for assistance...", 
                         "created_at": vn_now
                     }))
                 else:
-                    # Không có Admin online -> Xin lỗi và chuyển cho AI
                     await redis_client.publish(f"chat_{room_id}", json.dumps({
                         "room_id": room_id, "username": "SYSTEM ⚙️", 
                         "message": "😴 Currently, all administrators are offline. The AI ​​assistant will support you in place of the admins!",
