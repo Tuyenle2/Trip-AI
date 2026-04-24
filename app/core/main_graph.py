@@ -24,7 +24,7 @@ class TripPlannerSystem:
         workflow.add_node("planner", call_planner)
         
      
-       def supervisor_router(state: AgentState):
+        def supervisor_router(state: AgentState):
             last_msg = state["messages"][-1].content.lower()
             planner_keywords = ["chào", "hello", "hi", "ok", "yes", "đồng ý", "thanh toán", "book", "tuyệt", "cảm ơn", "payment", "pay", "plan", "itinerary"]
             if any(word in last_msg for word in planner_keywords):
@@ -33,6 +33,7 @@ class TripPlannerSystem:
             
             print("🔀 [Router]: Request a search -> Find the data through the Researcher")
             return "researcher"
+
         workflow.add_conditional_edges(START, supervisor_router, {"researcher": "researcher", "planner": "planner"})
         workflow.add_edge("researcher", "planner")
         workflow.add_edge("planner", END)
