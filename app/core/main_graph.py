@@ -10,7 +10,7 @@ from app.core.logger import get_logger
 logger = get_logger(__name__)
 class TripPlannerSystem:
     def __init__(self):
-        logger.info("🚀 Khởi tạo hệ thống Multi-Agent & Database...")
+        logger.info("🚀 Initialize the Multi-Agent & Database system...")
         uri = os.getenv("MONGODB_URI")
         if not uri:
             raise ValueError("Chưa cấu hình MONGODB_URI!")
@@ -24,15 +24,15 @@ class TripPlannerSystem:
         workflow.add_node("planner", call_planner)
         
      
-        def supervisor_router(state: AgentState):
+       def supervisor_router(state: AgentState):
             last_msg = state["messages"][-1].content.lower()
-            quick_words = ["chào", "hello", "hi", "ok", "yes", "đồng ý", "thanh toán", "book", "tuyệt", "cảm ơn"]
-            if any(word in last_msg for word in quick_words) and len(last_msg) < 50:
-                logger.info("🔀 [Router]: Lệnh cơ bản -> Đi thẳng đến Planner")
+            planner_keywords = ["chào", "hello", "hi", "ok", "yes", "đồng ý", "thanh toán", "book", "tuyệt", "cảm ơn", "payment", "pay", "plan", "itinerary"]
+            if any(word in last_msg for word in planner_keywords):
+                print("🔀 [Router]: Receive Order Schedule / Payment -> Go straight to Planner")
                 return "planner"
-            logger.info("🔀 [Router]: Yêu cầu phức tạp -> Qua Researcher tìm dữ liệu")
+            
+            print("🔀 [Router]: Request a search -> Find the data through the Researcher")
             return "researcher"
-
         workflow.add_conditional_edges(START, supervisor_router, {"researcher": "researcher", "planner": "planner"})
         workflow.add_edge("researcher", "planner")
         workflow.add_edge("planner", END)
