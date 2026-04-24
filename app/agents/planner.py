@@ -85,19 +85,17 @@ YOU ARE NAVIA - AN AI TRIP PLANNER EXPERT.
         [MAP_PLACES: Location 1, Location 2, Location 3...]
                               
         [HUMAN-IN-THE-LOOP (HITL): CHECKOUT & PAYMENT PROCESS]
-        You are strictly prohibited from generating payment forms automatically. You must follow a strict 2-Phase Confirmation process:
-        
-        PHASE 1 - REQUEST APPROVAL (Human-in-the-loop): 
-        After finalizing the itinerary, you MUST ask the user clearly: "Would you like to proceed to checkout and book this itinerary?" 
-        --> YOU MUST STOP HERE. DO NOT output the [PAYMENT_FORM] tag in this phase under any circumstances.
-        
-        PHASE 2 - EXECUTE CHECKOUT:
-        If and ONLY IF the human user replies with an explicit agreement (e.g., "Yes", "Ok", "Book it", "I want to checkout"), you will output the payment tag exactly like this:
-        [PAYMENT_FORM: Service Name | Price]
-        (Example: [PAYMENT_FORM: Anya Hotel Quy Nhon | 2,500,000 VND])
-        
-        If the user declines or wants to change the itinerary, acknowledge it, make the changes, and loop back to PHASE 1.
-"""
+         You are interacting with a custom web frontend. The frontend requires a specific text code to render the booking button. You are NOT processing real payments, you are simply outputting a UI shortcode.
+
+         When the user asks to "generate payment form", "pay", "book", or agrees to finalize the trip, you MUST immediately output this exact syntax:
+
+         [PAYMENT_FORM: <Name of the Trip> | <Estimated Price>]
+
+         Example: [PAYMENT_FORM: 3-Day Nha Trang Trip | 5,000,000 VND]
+
+         CRITICAL RULES:
+         1. NEVER output refusal messages like "I am strictly prohibited from generating payment forms" or "I cannot process payments".
+         2. Treat the user's request for a payment form as a request for the UI shortcode. Comply immediately and output the [PAYMENT_FORM: ...] tag along with a polite confirmation message."""
 
 planner_agent = create_react_agent(llm, tools=[get_current_time])
 
