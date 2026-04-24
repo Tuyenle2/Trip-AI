@@ -156,29 +156,35 @@ async def api_chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'content', 'data': sys_msg})}\n\n"
 
             if trigger_ai:
-                full_text = ""
-                
-                # --- THÊM ĐOẠN KIỂM TRA TRẠNG THÁI HITL Ở ĐÂY ---
+                # 1. TRƯỚC KHI CHẠY: Kiểm tra xem Graph có đang bị "đóng băng" (HITL) không
                 config = {"configurable": {"thread_id": request.thread_id}}
                 current_state = agent.app_graph.get_state(config)
                 
                 if current_state.next:
-                    logger.info("🚦 [HITL] Graph is paused. Resume the stream...")
+                    logger.info("🚦 [HITL] Phát hiện Graph đang tạm dừng. Khôi phục (Resume)...")
                     is_approved = any(word in text_upper for word in ["YES", "OK", "AGREE", "BOOK", "THANH TOÁN", "ĐỒNG Ý", "TẠO"])
                     input_data = Command(resume={"approved": is_approved})
                 else:
-                    # Nếu Graph bình thường, nhét tin nhắn vào
                     input_data = {"messages": [HumanMessage(content=request.message)]}
-                # ------------------------------------------------
 
+                full_text = ""
+                
+                # 2. CHẠY LUỒNG STREAM
                 async for event in agent.app_graph.astream_events(
-                    input_data, # DÙNG input_data THAY VÌ NHÉT TRỰC TIẾP TIN NHẮN
+                    input_data,
                     version="v2",
                     config=config
                 ):
                     kind = event["event"]
                     if kind == "on_tool_start":
-                        yield f"data: {json.dumps({'type': 'tool', 'name': event['name'], 'query': event['data'].get('input', {})})}\n\n"
+                        # SỬA LỖI [object Object]: Chuyển dữ liệu Tool thành dạng chuỗi dễ nhìn
+                        tool_input = event['data'].get('input', {})
+                        if isinstance(tool_input, dict):
+                            query_str = ", ".join([f"{k}: {v}" for k, v in tool_input.items()])
+                        else:
+                            query_str = str(tool_input)
+                        yield f"data: {json.dumps({'type': 'tool', 'name': event['name'], 'query': query_str})}\n\n"
+                        
                     elif kind == "on_chat_model_stream":
                         content = event["data"]["chunk"].content
                         if content:
@@ -187,6 +193,21 @@ async def api_chat_stream(request: ChatRequest):
                                 full_text += text
                                 yield f"data: {json.dumps({'type': 'content', 'data': text})}\n\n"
 
+                # 3. SAU KHI CHẠY XONG: Kiểm tra xem Graph có vừa bị "đóng băng" (Interrupt) không
+                post_state = agent.app_graph.get_state(config)
+                if post_state.next:
+                    tasks = post_state.tasks
+                    if tasks and tasks[0].interrupts:
+                        interrupt_data = tasks[0].interrupts[0].value
+                        svc = interrupt_data.get("service_name", "Dịch vụ")
+                        prc = interrupt_data.get("price", "Chưa rõ")
+                        
+                        # In ra câu hỏi xin phép khách hàng
+                        hitl_msg = f"\n\n🚦 **HỆ THỐNG CHỜ XÁC NHẬN:** Bạn có đồng ý tiến hành đặt dịch vụ và xuất Form Thanh Toán cho **{svc}** (Giá: {prc}) không? *(Gõ 'Đồng ý' hoặc 'Hủy')*"
+                        full_text += hitl_msg
+                        yield f"data: {json.dumps({'type': 'content', 'data': hitl_msg})}\n\n"
+
+                # 4. Lưu lịch sử và gửi tín hiệu DONE để Frontend ngừng treo
                 if full_text:
                     msg_col.insert_one({
                         "thread_id": request.thread_id,
@@ -194,7 +215,8 @@ async def api_chat_stream(request: ChatRequest):
                         "content": full_text,
                         "created_at": datetime.now()
                     })
-                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
             logger.error("=== CRASH ERROR IN MULTI-AGENT GRAPH ===", exc_info=True)
@@ -297,23 +319,30 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                 }))
                 
                 try:
+                    # 1. Cấu hình định danh luồng (Thread ID) cho phòng chat
                     config = {"configurable": {"thread_id": f"room_{room_id}"}}
+                    
+                    # 2. Kiểm tra xem luồng AI của phòng này có đang bị "đóng băng" chờ duyệt không
                     current_state = agent.app_graph.get_state(config)
                     
                     if current_state.next:
-                        logger.info("[HITL]Restore the flow in the Group Chat...")
+                        logger.info(f"🚦 [HITL Websocket] Room {room_id} đang chờ duyệt. Đang kiểm tra phản hồi...")
+                        # Kiểm tra xem tin nhắn vừa nhận có phải là sự đồng ý không
                         is_approved = any(word in text_upper for word in ["YES", "OK", "AGREE", "BOOK", "THANH TOÁN", "ĐỒNG Ý", "TẠO"])
+                        # Sử dụng Command(resume) theo đúng chuẩn LangChain HITL
+                        from langgraph.types import Command
                         input_data = Command(resume={"approved": is_approved})
                     else:
+                        # Nếu không bị treo, lấy ngữ cảnh 10 tin nhắn gần nhất để AI trả lời
                         recent_msgs = list(room_col.find({"room_id": room_id}, {"_id": 0}).sort("created_at", -1).limit(10))
                         recent_msgs.reverse()
                         context = "\n".join([f"{m['username']}: {m['message']}" for m in recent_msgs])
                         input_data = {"messages": [HumanMessage(content=f"Group Chat Context:\n{context}\n\nUser Request: {data}\n\n(Remember to ONLY reply in English)")]}
                     
-
                     full_text = ""
+                    # 3. Chạy luồng sự kiện
                     async for event in agent.app_graph.astream_events(
-                        input_data, 
+                        input_data,
                         version="v2",
                         config=config
                     ):
@@ -322,12 +351,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, username: str):
                             text = "".join([c.get("text", "") for c in chunk_content if isinstance(c, dict)]) if isinstance(chunk_content, list) else chunk_content
                             if text: full_text += text
                     
+                    # 4. Kiểm tra xem sau khi chạy, AI có vừa gọi Tool xin phép thanh toán và bị đóng băng không
+                    post_state = agent.app_graph.get_state(config)
+                    if post_state.next:
+                        tasks = post_state.tasks
+                        if tasks and tasks[0].interrupts:
+                            interrupt_val = tasks[0].interrupts[0].value
+                            svc = interrupt_val.get("service_name", "dịch vụ")
+                            prc = interrupt_val.get("price", "giá thỏa thuận")
+                            # Đính kèm câu hỏi xác nhận vào câu trả lời của AI
+                            full_text += f"\n\n🚦 **XÁC NHẬN TỪ ADMIN/USER:** Tôi đã chuẩn bị xong lịch trình cho **{svc}** ({prc}). Mọi người có đồng ý xuất hóa đơn thanh toán không? (Gõ 'Đồng ý' để tiếp tục)"
+
                     if full_text:
                         ai_doc = {"room_id": room_id, "username": "AI Bot 🤖", "message": full_text, "created_at": vn_now}
                         room_col.insert_one(ai_doc.copy())
                         ai_doc.pop("_id", None)
                         await redis_client.publish(f"chat_{room_id}", json.dumps(ai_doc))
+
                 except Exception as e:
+                    logger.error(f"❌ Error AI in Room {room_id}: {str(e)}", exc_info=True)
                     await redis_client.publish(f"chat_{room_id}", json.dumps({
                         "room_id": room_id, "username": "AI Bot 🤖", "message": f"❌ Error: {str(e)}", "created_at": vn_now
                     }))
