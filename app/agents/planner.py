@@ -12,6 +12,7 @@ logger = get_logger(__name__)
 
 @tool
 async def get_current_time() -> str:
+    """Use this tool only when you need to know the current date and time to calculate departure dates, check weather, or flight prices."""
     vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
     return f"The current time in Vietnam is: {datetime.now(vn_tz).strftime('%A, %d/%m/%Y %H:%M:%S')}"
 
@@ -19,7 +20,7 @@ async def get_current_time() -> str:
 def request_payment_approval(service_name: str, estimated_price: str) -> str:
     """CALL THIS TOOL IMMEDIATELY after presenting the itinerary to ask the user if they want to book and pay."""
     logger.info(f"🚦 [HITL] Tạm dừng hệ thống để xin phép thanh toán cho: {service_name}")
-    
+
     decision = interrupt({
         "action": "payment_approval",
         "service_name": service_name,
@@ -30,7 +31,6 @@ def request_payment_approval(service_name: str, estimated_price: str) -> str:
         return f"User APPROVED. You MUST immediately output EXACTLY this string: [PAYMENT_FORM: {service_name} | {estimated_price}]"
     else:
         return "User DECLINED. Do not output the payment form. Ask them what they want to modify in the itinerary."
-
 llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0.3)
 
 planner_prompt = """
