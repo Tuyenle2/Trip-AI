@@ -5,9 +5,7 @@ from app.core.config import setup_env
 from app.api.routes import router
 
 setup_env()
-from app.db.database import init_db
 from app.api.routes import router
-init_db()
 app = FastAPI(title="AI Trip Planner API Pro", version="3.0")
 
 app.add_middleware(
