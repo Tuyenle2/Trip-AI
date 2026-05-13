@@ -19,7 +19,7 @@ async def get_current_time() -> str:
 @tool
 def request_payment_approval(service_name: str, estimated_price: str) -> str:
     """CALL THIS TOOL IMMEDIATELY after presenting the itinerary to ask the user if they want to book and pay."""
-    logger.info(f"🚦 [HITL] Tạm dừng hệ thống để xin phép thanh toán cho: {service_name}")
+    logger.info(f"[HITL] The system is temporarily paused to request payment for: {service_name}")
 
     decision = interrupt({
         "action": "payment_approval",

@@ -2,14 +2,14 @@ import os
 import psycopg2
 
 def get_db_connection():
-    """Lấy kết nối từ biến môi trường DATABASE_URL"""
+    """Get database connection from DATABASE_URL environment variable"""
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
-        raise ValueError("Chưa cấu hình DATABASE_URL trong file .env")
+        raise ValueError("DATABASE_URL has not been configured yet in the .env file")
     return psycopg2.connect(db_url)
 
 def init_db():
-    """Khởi tạo các bảng bằng cú pháp PostgreSQL"""
+    """Initialize tables using PostgreSQL syntax."""
     conn = get_db_connection()
     c = conn.cursor()
     

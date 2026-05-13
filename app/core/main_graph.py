@@ -13,7 +13,7 @@ class TripPlannerSystem:
         logger.info("🚀 Initialize the Multi-Agent & Database system...")
         uri = os.getenv("MONGODB_URI")
         if not uri:
-            raise ValueError("Chưa cấu hình MONGODB_URI!")
+            raise ValueError("MONGODB_URI has not been configured yet!")
             
         self.client = MongoClient(uri, tls=True, tlsCAFile=certifi.where())
         self.memory = MongoDBSaver(self.client)

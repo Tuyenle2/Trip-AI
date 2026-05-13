@@ -8,15 +8,15 @@ def hash_password(password: str) -> str:
 
 def register_user_service(username, password):
     if len(username) < 3 or len(password) < 3:
-        raise HTTPException(status_code=400, detail="Tài khoản và mật khẩu phải >= 3 ký tự.")
+        raise HTTPException(status_code=400, detail="The username and password must be at least 3 characters long.")
     try:
         create_user(username, hash_password(password))
     except psycopg2.IntegrityError: 
-        raise HTTPException(status_code=400, detail="Tên đăng nhập đã tồn tại!")
-    return {"message": "Đăng ký thành công"}
+        raise HTTPException(status_code=400, detail="Username already exists!")
+    return {"message": "Registration successful"}
 
 def login_user_service(username, password):
     result = get_user_password(username)
     if result and result[0] == hash_password(password):
-        return {"message": "Đăng nhập thành công", "username": username}
-    raise HTTPException(status_code=401, detail="Sai tài khoản hoặc mật khẩu")
+        return {"message": "Login successful", "username": username}
+    raise HTTPException(status_code=401, detail="Invalid username or password")

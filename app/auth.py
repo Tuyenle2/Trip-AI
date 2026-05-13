@@ -10,15 +10,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def verify_password(plain_password, hashed_password):
-    """Kiểm tra mật khẩu người dùng nhập có khớp với mã băm trong DB không"""
+    """Verify the user's password against the hashed password in the database"""
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password):
-    """Băm mật khẩu trước khi lưu vào Database"""
+    """Hash the password before storing it in the database"""
     return pwd_context.hash(password)
 
 def create_access_token(data: dict):
-    """Tạo JWT Token"""
+    """Create a JWT Token"""
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})

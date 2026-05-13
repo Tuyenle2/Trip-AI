@@ -8,7 +8,6 @@ langgraph
 google-search-results
 python-dotenv
 httpx
-psycopg2-binary
 faiss-cpu
 pytz
 motor
