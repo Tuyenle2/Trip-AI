@@ -21,3 +21,4 @@ mcp
 langchain-mcp-adapters
 pypdf
 PyPDF2
+psycopg2-binary
