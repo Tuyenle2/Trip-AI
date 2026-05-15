@@ -10,6 +10,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.prebuilt import create_react_agent
 from app.core.logger import get_logger
+#from langchain_core.tools import tool
+#from langchain_core.messages import HumanMessage
 
 logger = get_logger(__name__)
 
@@ -119,3 +121,13 @@ async def call_researcher(state: dict):
     input_messages = [SystemMessage(content=researcher_prompt)] + state["messages"]
     result = await agent.ainvoke({"messages": input_messages})
     return {"messages": [result["messages"][-1]]}
+
+
+#@tool
+#async def researcher_tool(query: str) -> str:
+    #"""CALL THIS TOOL strictly when you need to search for real travel data, flight prices, hotel availability, local weather, or factual information about a destination.
+    #Input should be a detailed search query in English."""
+    #logger.info(f"🤝 [Agent-as-Tool] Planner đang nhờ Researcher tìm kiếm: {query}")
+    #agent = get_researcher_agent()
+    #result = await agent.ainvoke({"messages": [HumanMessage(content=query)]})
+    #return result["messages"][-1].content

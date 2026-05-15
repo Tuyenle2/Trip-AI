@@ -37,15 +37,6 @@ redis_client = aioredis.from_url(
     retry_on_timeout=True
 )
 
-#planner_agent_instance = None
-#def get_agent():
-    #global planner_agent_instance
-    #if planner_agent_instance is None:
-        #print("🚀 Initialize the Agent when the first user sends a message....")
-        #uri = os.getenv("MONGODB_URI") 
-        #planner_agent_instance = TripPlannerAgent(mongodb_uri=uri)
-    #return planner_agent_instance
-
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -433,30 +424,35 @@ async def admin_reply_message(req: AdminReplyRequest):
 async def upload_travel_document(file: UploadFile = File(...)):
     try:
         content_text = ""
-        if file.filename.endswith(".txt"):
-            content = await file.read()
+    
+        content = await file.read() 
+
+        if file.filename.lower().endswith(".txt"):
             content_text = content.decode("utf-8")
-        elif file.filename.endswith(".pdf"):
-            content = await file.read()
+        elif file.filename.lower().endswith(".pdf"):
+         
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
             for page in pdf_reader.pages:
-                content_text += page.extract_text() + "\n"
+                page_text = page.extract_text()
+                if page_text:
+                    content_text += page_text + "\n"
         else:
-            raise HTTPException(status_code=400, detail="Only supports .txt ")
+            raise HTTPException(status_code=400, detail="Hệ thống chỉ hỗ trợ định dạng .txt hoặc .pdf")
 
         if len(content_text.strip()) < 10:
-            raise HTTPException(status_code=400, detail="The document is too short or the text is illegible.")
+            raise HTTPException(status_code=400, detail="Tài liệu quá ngắn hoặc không thể đọc được nội dung văn bản.")
 
-        logger.info("🛡️ The document's content is currently being reviewed...")
+        logger.info(f"🛡️ Đang kiểm duyệt nội dung tài liệu: {file.filename}")
+        
         validator_llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", temperature=0)
         validation_prompt = f"""
         You are a content filter. Read the following text and indicate whether it relates to: Travel, itineraries, hotels, flights, tourist attractions, airline tickets, or restaurant reviews?
         If YES it relates to travel, answer only: "YES".
         If NOT it relates (e.g., medical documents, mathematics, code, contracts are irrelevant), answer only: "NO".
-        Text: {content_text[:2000]} # Only read the first 2000 characters to save tokens
+        Text: {content_text[:2000]}
         """
         
-        ai_response = validator_llm.invoke(validation_prompt)
+        ai_response = await validator_llm.ainvoke(validation_prompt)
         
         if isinstance(ai_response.content, list):
             extracted_text = "".join([item.get("text", "") for item in ai_response.content if isinstance(item, dict)])
@@ -465,19 +461,24 @@ async def upload_travel_document(file: UploadFile = File(...)):
             
         validation_result = extracted_text.strip().upper()
         
+      
         if "NO" in validation_result:
             raise HTTPException(
                 status_code=400, 
-                detail="The system currently only supports analyzing travel-related documents (such as airline tickets, itineraries, travel guides, etc.). Please check and upload the correct type of document."
+                detail="Hệ thống hiện chỉ hỗ trợ phân tích các tài liệu liên quan đến du lịch (vé máy bay, lịch trình, cẩm nang...). Vui lòng kiểm tra lại."
             )
 
         add_document_to_rag(content_text)
 
         return {
             "status": "success", 
-            "message": f"The document '{file.filename}' has been uploaded to the AI memory. You can now ask questions about this document!"
+            "message": f"Tài liệu '{file.filename}' đã được tải lên bộ nhớ AI thành công!"
         }
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        logger.info(f"Upload error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Lỗi upload nghiêm trọng: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Đã xảy ra lỗi trong quá trình xử lý tài liệu.")
+    finally:
+        await file.close()

@@ -7,6 +7,7 @@ from langgraph.prebuilt import create_react_agent
 from app.core.logger import get_logger
 from langgraph.types import interrupt 
 from app.core.logger import get_logger
+#from app.agents.researcher import researcher_tool
 
 logger = get_logger(__name__)
 
@@ -110,6 +111,7 @@ You CANNOT generate payment forms directly. You must follow this 2-step process:
 """
 
 planner_agent = create_react_agent(llm, tools=[get_current_time, request_payment_approval])
+#planner_agent = create_react_agent(llm, tools=[get_current_time, request_payment_approval, researcher_tool])
 
 async def call_planner(state: dict):
     logger.info("✍️ [Planner Agent] Designing the schedule and processing payments...")
